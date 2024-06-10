@@ -1,0 +1,282 @@
+---
+title: "Get ETF Constituents From SPDR, Invesco, iShares"
+output:
+  html_document:
+    df_print: paged
+geometry: margin=1cm
+date: '`r format(Sys.Date(), "%A, %B %d, %Y")`'
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{=html}
+<style>
+body {
+    position: absolute;
+    left: 0px;}
+</style>
+```
+```{r setup, include=FALSE}
+setwd("/Volumes/6TB/R")
+# get constituent data
+suppressPackageStartupMessages(require("readxl"))
+suppressPackageStartupMessages(require("data.table"))
+suppressPackageStartupMessages(require("dplyr"))
+suppressPackageStartupMessages(require("quantmod"))
+```
+
+
+### SPDR ETFs
+SPDR provides constituent data for all products. We can download all as a batch but are downloaded as .xlsx files. We can specify a location on where to save them and then read them into R. 
+```{r spdr, echo=FALSE,warning=FALSE}
+
+# download all daily holdings
+getSPDR = function(PATH,dl_Date){
+  # url to zip file
+  URL = paste0("https://www.ssga.com/library-content/products/fund-data/etfs/us/us_spdrallholdings.zip")
+  # download the zipped file
+  download.file(url = URL, quiet = TRUE,destfile = paste0(getwd(),"/SPDR.zip"))
+  # unzip the file to a different location 
+  unzip(paste0(getwd(),"/SPDR.zip"),exdir = paste0(PATH,"SPDR_",format(dl_Date,"%Y%m%d")))
+}
+# read in XLSX files
+readSPDR = function(PATH,dl_Date,ticker){
+  # where is the file located
+  FILE = paste0(PATH,"SPDR_",format(dl_Date,"%Y%m%d"),"/","holdings-daily-us-en-",tolower(ticker),".xlsx")
+  # read in file
+  tbl <- readxl::read_xlsx(FILE) %>% suppressMessages() %>% suppressWarnings()
+  # removes unused rows
+  tbl <- na.omit(tbl)
+  # reassign column names
+  colnames(tbl) <- tbl[1,]
+  # drop first row
+  tbl <-  tbl[-1,]
+  # return table
+  tbl
+}
+# read in ALL
+readAllSPDR = function(PATH){
+  # list all folders
+  FOLDERS <- list.files(PATH)
+  # list all file paths
+  FILES = do.call(c,lapply(as.list(FOLDERS), function(x){
+    list.files(paste0(PATH,x),full.names = TRUE)
+  }))
+  # for each of the files combine into a single variable
+  ETFS = lapply(as.list(FILES), function(x){
+    # get ETF name
+    getName <- str_split(x,"/",simplify = TRUE)
+    getName <- as.character(getName[,ncol(getName)])
+    getName <- gsub("holdings-daily-us-en-","",getName)
+    getName <- gsub(".xlsx","",getName)
+    getName <- toupper(getName)
+    # read in file
+    tbl <- read_xlsx(x) %>% suppressMessages() %>% suppressWarnings()
+    # removes unused rows
+    tbl <- na.omit(tbl)
+    # reassign column names
+    colnames(tbl) <- tbl[1,]
+    # drop first row
+    tbl <-  tbl[-1,]
+    # add ETF name
+    tbl$ETF <- getName
+    # return table
+    tbl
+  })
+  # rbind all tables 
+  ETFS <- rbindlist(ETFS,use.names = TRUE,fill = TRUE)
+  # set columns to numeric
+  setDT(ETFS)[, c(4:7) := lapply (.SD, function(x) round(as.numeric(x),4)), .SDcols=c(4:7)] %>% suppressWarnings() %>% suppressMessages()
+  # change Weight to proper format
+  ETFS$Weight <- as.numeric(ETFS$Weight)/100
+  # return table
+  ETFS
+}
+
+
+```
+
+## Test SPDR
+Specify a path in your computer where to 'unzip' the files to. R will use this location to read in the .xlsx files.
+```{r testSPDR, echo=FALSE,warning=FALSE}
+# downloads as .xlsx file - use require("readxl") to read them into RStudio
+PATH = paste0("/Volumes/6TB/constituents/SPDR/")
+dl_Date = Sys.Date()
+# get all SPDR ETF data
+getSPDR(PATH,dl_Date = Sys.Date())
+
+# read in individual ETFS
+# SPY <- readSPDR(PATH,ticker="SPY",dl_Date = Sys.Date())
+# DIA <- readSPDR(PATH,ticker="DIA",dl_Date = Sys.Date())
+# BIL <- readSPDR(PATH,ticker="BIL",dl_Date = Sys.Date())
+# XLK <- readSPDR(PATH,ticker="XLK",dl_Date = Sys.Date())
+# read in all ETFS - takes some time to run!
+all_etfs = readAllSPDR(PATH)
+saveRDS(all_etfs,"all_etfs.rds")
+all_etfs <- readRDS("all_etfs.rds")
+all_etfs$`Shares Held` <- as.numeric(all_etfs$`Shares Held`) %>% suppressWarnings() %>% suppressMessages()
+saveDATE <- RQuantLib::advance(calendar = "UnitedStates/NYSE",dates = Sys.Date(),n = -1,timeUnit = 0)
+all_etfs$Date <- saveDATE
+saveRDS(all_etfs,paste0("/Volumes/6TB/constituents/spdrs/",format(as.Date(saveDATE),"%Y%m%d"),".rds"))
+
+# subset stock ETFS only (exclude bonds/bill etfs)
+stk_etfs = subset(all_etfs,!is.na(all_etfs$Ticker))
+stk_etfs = stk_etfs[,c("Name", "Weight","Local Currency", "ETF","Ticker", "Shares Held")]
+colnames(stk_etfs) <- c("name","weight","currency","etf","ticker","sharesHeld")
+stk_etfs <- as.data.frame(stk_etfs)
+# replace "-" tickers with CASH
+stk_etfs$ticker <- gsub("-","CASH",stk_etfs$ticker)
+# we can use the table to aggregate by symbol and see how many shares have been bought
+stk_etfs$sharesHeld <- as.numeric(stk_etfs$sharesHeld)
+totalShares <- stk_etfs %>% group_by(ticker) %>% summarise(totalShares = sum(sharesHeld,na.rm = TRUE),
+                                                           etfCount = n(),
+                                                           avgWt = mean(weight,na.rm = TRUE),
+                                                           sumWt = sum(weight,na.rm = TRUE))
+                                                        
+totalShares<- totalShares[order(totalShares$sumWt,decreasing = TRUE),]
+View(subset(stk_etfs,stk_etfs$ticker == "NVDA"))
+
+```
+
+
+### Invesco ETFs
+
+Invesco provides a list of products which we can download directly into R. We can also read them into R by assigning a ticker symbol into the getInvescoETF function.
+```{r invesco, echo=FALSE,warning=FALSE}
+
+# INVESCO
+getInvescoProducts= function(){
+  URL = "https://www.invesco.com/us/financial-products/etfs/performance/prices/main/performance/0?audienceType=Investor&action=download"
+  tbl <- readLines(URL)
+  # filter out the repeating, and wonky headers
+  tbl_2 <- grep("Node Name,RTC_date", tbl, invert=TRUE, value=TRUE)
+  # turn that vector into a text connection for read.csv
+  tbl_3 <- read.csv(textConnection(paste0(tbl_2, collapse="\n")),header=FALSE, stringsAsFactors=FALSE)
+  # skip over NA lines
+  tbl <- tbl_3[which(tbl_3$V1 == "Name"):nrow(tbl_3),]
+  # change column names
+  colnames(tbl) <- tbl[1,]
+  # remove 1st row
+  tbl <- tbl[-1,]
+  # return tbl
+  tbl
+}
+# get constituents for invesco ets
+getInvescoETF = function(ticker){
+  Sys.sleep(5)
+  # create url
+  url = paste0("https://www.invesco.com/us/financial-products/etfs/holdings/main/holdings/0?audienceType=Investor&action=download&ticker=",
+               ticker)
+  # read in data
+  df <- read.csv2(url,header =TRUE,sep = ",")
+  # format columns
+  df$MarketValue <- as.numeric(gsub("\\,","",df$MarketValue))
+  df$Weight <- as.numeric(df$Weight)/100
+  df$Shares.Par.Value <- as.numeric(gsub("\\,","",df$Shares.Par.Value))
+  # return data
+  df
+}
+
+```
+
+## Test Invesco
+Get Product list and also read in a couple of their ETFs.
+```{r testInvesco, echo=FALSE,warning=FALSE}
+# get product list
+invProd <- getInvescoProducts()
+# test function
+# QQQ  <- getInvescoETF("QQQ")   # Invesco QQQ
+# QQQS <- getInvescoETF("QQQS")  # Invesco NASDAQ Future Gen 200 ETF
+# PSP  <- getInvescoETF("PSP")   # Invesco Global Listed Private Equity ETF
+# ADRE <- getInvescoETF("ADRE")  # Invesco BLDRS Emerging Markets 50 ADR Index Fund 
+
+invTickers = as.character(invProd$Ticker)
+
+invALL = lapply(as.list(invTickers), function(x){
+  tmp <- try(getInvescoETF(ticker = x),silent = TRUE)
+  if(!inherits(tmp,'try-error'))
+    tmp
+})
+# row bind results
+invETFS <- rbindlist(invALL,use.names = TRUE,fill=TRUE)
+invETFS <- as.data.frame(invETFS)
+
+invETFS$Shares.Par.Value <- as.numeric(invETFS$Shares.Par.Value)
+invETFS$MarketValue <- as.numeric(invETFS$MarketValue)
+invETFS$Weight <- as.numeric(invETFS$Weight)
+invETFS$Date <- as.character(as.Date(invETFS$Date,"%m/%d/%Y"))
+saveDATE <-unique(invETFS$Date)[1]
+# saveRDS
+saveRDS(invETFS,paste0("/Volumes/6TB/constituents/invesco/",format(as.Date(saveDATE),"%Y%m%d"),".rds"))
+
+```
+
+
+### iShares ETFs
+
+iShares is a bit picky with their links. Each link has a product "ID" along with the full name of the ETF embeded. We can try parsing the urls in the future but we will just display a couple with manual assigning.
+```{r ishares, echo=FALSE,warning=FALSE}
+# download product screener
+# https://www.ishares.com/us/products/etf-investments#/?productView=etf&pageNumber=1&sortColumn=totalNetAssets&sortDirection=desc&dataView=keyFacts
+# format spreadsheet and save as CSV
+iShares = read.csv("product-screener.csv",header = TRUE,sep = ",")
+
+
+getiSharesETF = function(iShares,ticker){
+  Sys.sleep(5)
+  # URL = "https://www.ishares.com/us/products/239710/ishares-russell-2000-etf/1467271812596.ajax?fileType=csv&fileName=IWM_holdings&dataType=fund"
+  # URL = "https://www.ishares.com/us/products/239454/ishares-20-year-treasury-bond-etf/1467271812596.ajax?fileType=csv&fileName=TLT_holdings&dataType=fund"
+  # URL = "https://www.ishares.com/us/products/239763/ishares-core-sp-midcap-etf/1467271812596.ajax?fileType=csv&fileName=IJH_holdings&dataType=fund
+  # URL = "https://www.ishares.com/us/products/244049/ishares-core-msci-eafe-etf/1467271812596.ajax?fileType=csv&fileName=IEFA_holdings&dataType=fund"
+  tmp <- subset(iShares, iShares$Ticker == ticker)
+  URL = paste0(tmp$Name,"/1467271812596.ajax?fileType=csv&fileName=",x,"_holdings&dataType=fund")
+  ETF <- read.csv(URL,skip = 9,header = TRUE)
+  # complete cases only
+  ETF <- ETF[complete.cases(ETF$Weight....),]
+  # add ETF
+  ETF$etf <- ticker
+  # format columns
+  ETF$Market.Value <- as.numeric(gsub(",","",ETF$Market.Value)) %>% suppressWarnings() %>% suppressMessages()
+  ETF$Weight.... <- as.numeric(ETF$Weight....)/100 %>% suppressWarnings() %>% suppressMessages()
+  ETF$Notional.Value <- as.numeric(gsub(",","",ETF$Notional.Value)) %>% suppressWarnings() %>% suppressMessages()
+  ETF$Shares <- as.numeric(gsub(",","",ETF$Shares)) %>% suppressWarnings() %>% suppressMessages()
+  ETF$Price <- as.numeric(ETF$Price) %>% suppressWarnings() %>% suppressMessages()
+  
+  ETF
+}
+
+```
+
+## Test iShares
+Get IWM ETF constituents.
+```{r testIShares, echo=FALSE,warning=FALSE}
+# test function
+ETF = unique(iShares$Ticker)
+ETF <- ETF[str_length(ETF)>0]
+
+ALL = lapply(as.list(ETF), function(x){
+  #cat("\n",x)
+  tmp <- try(getiSharesETF(iShares = iShares, ticker = x),silent = TRUE)
+  if(!inherits(tmp,'try-error'))
+    tmp
+})
+# row bind results
+ETFS <- rbindlist(ALL,use.names = TRUE,fill=TRUE)
+ETFS <- as.data.frame(ETFS)
+ETFS$Date <- saveDATE
+# saveRDS
+saveRDS(ETFS,paste0("/Volumes/6TB/constituents/iShares/",format(as.Date(saveDATE),"%Y%m%d"),".rds"))
+
+# summarise
+ISHARES = ETFS %>% group_by(Ticker) %>% summarise(totalShares = sum(Shares,na.rm = TRUE),
+                                                  etfCount = n(),
+                                                  avgWt = mean(Weight....,na.rm = TRUE),
+                                                  sumWt = sum(Weight....,na.rm = TRUE),
+                                                  nValue = sum(Notional.Value,na.rm = TRUE))
+
+
+ISHARES <- ISHARES[order(ISHARES$nValue,decreasing = TRUE),]
+ISHARES$sValue <- scales::label_number(accuracy=0.01, scale_cut=scales::cut_short_scale())(ISHARES$nValue)
+
+```

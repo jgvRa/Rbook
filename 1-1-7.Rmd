@@ -1,0 +1,123 @@
+---
+title: "NASDAQ FTP Server"
+output: html_document
+date: "2023-12-22"
+---
+
+```{r setup, include=FALSE}
+require("RCurl");require("data.table");require('stringr')
+```
+
+## Requresting Filenames
+
+```{r nas_ftp, echo=FALSE}
+# fetching the file names
+url <- "ftp://ftp.nasdaqtrader.com/symboldirectory/"
+filenames <- getURL(url, ftp.use.epsv = FALSE,dirlistonly = TRUE) 
+filenames <- unlist(strsplit(filenames,"\n"))
+# print file names
+print(filenames)
+# nasdaq listed stocks
+tbl1 <- data.table::fread(paste0(url,"nasdaqlisted.txt"),sep = "|",header = TRUE)
+# nasdaq traded stocks
+tbl2 <- data.table::fread(paste0(url,"nasdaqtraded.txt"),sep = "|",header = TRUE)
+
+tbl1_tic <- subset(tbl1,tbl1$ETF == "N")
+tbl2_tic <- subset(tbl2,tbl2$ETF == "N")
+
+```
+
+## Including Plots
+
+```{r nas_ftp_folders, echo=FALSE}
+# for reg-sho & reg nms
+#url <- "ftp://ftp.nasdaqtrader.com/symboldirectory/regnms/"
+url <- "ftp://ftp.nasdaqtrader.com/symboldirectory/regsho/"
+# url <- "ftp://ftp.nasdaqtrader.com/symboldirectory/regshopilot/"
+# url <- "ftp://ftp.nasdaqtrader.com/symboldirectory/regshopilotlist/"
+# url <- "ftp://ftp.nasdaqtrader.com/symboldirectory/shorthalts/"
+filenames2 <- getURL(url, ftp.use.epsv = FALSE,dirlistonly = TRUE) 
+filenames2 <- unlist(strsplit(filenames2,"\n"))
+
+print(filenames2)
+# regnms
+#tbl3 <- data.table::fread(paste0(url,"regnmspilot20231221.txt"),sep = "|",header = TRUE)
+# regsho
+tbl4 <- data.table::fread(paste0(url,"nasdaqth20231220.txt"),sep = "|",header = TRUE)
+```
+
+## Save stocks only
+
+Removes Warrants, Units, Rights, ETFS
+```{r nas2_ftp, echo=FALSE}
+
+tbl1_tic <- subset(tbl1,tbl1$ETF == "N")
+tbl2_tic <- subset(tbl2,tbl2$ETF == "N")
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "Warrant"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "Warrant"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "warrants"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "warrants"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "rights"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "rights"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "units"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "units"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "- Unit"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "- Unit"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "- Right"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "- Right"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "- warrant"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "- warrant"))
+
+tbl1_tic <- subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`,pattern = "%"))
+tbl2_tic <- subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`,pattern = "%"))
+
+tickers <- unique(c(tbl1_tic$Symbol,tbl2_tic$Symbol))
+
+saveRDS(tickers,'/Volumes/6TB/R/nasdaqFTP.rds')
+
+```
+
+## Save ETFS only
+
+Removes Warrants, Units, Rights, ETFS
+```{r nas2_ftp, echo=FALSE}
+
+tbl1_tic <- subset(tbl1,tbl1$ETF == "Y")
+tbl2_tic <- subset(tbl2,tbl2$ETF == "Y")
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "Warrant"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "Warrant"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "warrants"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "warrants"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "rights"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "rights"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "units"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "units"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "- Unit"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "- Unit"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "- Right"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "- Right"))
+
+tbl1_tic = subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`, pattern = "- warrant"))
+tbl2_tic = subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`, pattern = "- warrant"))
+
+tbl1_tic <- subset(tbl1_tic,!str_detect(tbl1_tic$`Security Name`,pattern = "%"))
+tbl2_tic <- subset(tbl2_tic,!str_detect(tbl2_tic$`Security Name`,pattern = "%"))
+
+tickers <- unique(c(tbl1_tic$Symbol,tbl2_tic$Symbol))
+
+saveRDS(tickers,'/Volumes/6TB/R/nasdaqFTP_ETF.rds')
+
+```
