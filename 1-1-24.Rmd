@@ -1,0 +1,243 @@
+---
+title: "TSLA Financials"
+output:
+  html_document:
+    df_print: paged
+geometry: margin=1cm
+date: '`r format(Sys.Date()-1, "%A, %B %d, %Y")`'
+---
+Inspired By: <https://www.r-bloggers.com/2021/01/professional-financial-reports-with-rmarkdown/>
+GitHub: <https://github.com/bradlindblad/pro_reports_talk/blob/main/R/rmarkdown/income_stmt.Rmd>
+
+```{=html}
+<style>
+body {
+    position: absolute;
+    left: 0px;}
+</style>
+```
+```{r setup, include=FALSE}
+require("quantmod");require("dplyr");require("data.table");require("knitr");require("kableExtra");require("scales")
+source("getfinHub.R")
+```
+
+```{r getData, echo=FALSE}
+stk_finQ <- getFinancialsFH(stk="TSLA",freq="quarterly",apiKey = pw$apiKey) # quarterly
+stk_finK <- getFinancialsFH(stk="TSLA",freq="annual",apiKey = pw$apiKey) # annual
+stk_fin <- rbind(stk_finQ,stk_finK)
+# build Income Statement
+income_statement = subset(stk_fin,stk_fin$rep== "incomeStatement")
+# summarize
+is_tbl <- income_statement %>% group_by(endDate) %>% 
+          # ******* Sales *******************
+  reframe(Sales = value[concept == 'tsla_AutomotiveSalesRevenue'],
+          GovtCredits= value[concept == 'tsla_AutomotiveRegulatoryCredits'],
+          LeaseRev= value[concept == 'tsla_AutomotiveLeasing'],
+          totalRev = value[concept == 'tsla_AutomotiveRevenues'],
+          Energy = value[concept == 'us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax'],
+          totalSales = value[concept == 'us-gaap_Revenues'],
+          # ******* COGS *******************
+          auto_cogs = value[concept == 'tsla_AutomotiveCostOfRevenues'],
+          lease_cogs = value[concept == 'us-gaap_DirectCostsOfLeasedAndRentedPropertyOrEquipment'],
+          total_auto_cogs = value[concept == 'tsla_AutomotiveCostOfRevenues'],
+          other_cogs = value[concept == 'us-gaap_CostOfGoodsAndServicesSold'],
+          total_cogs = value[concept == 'us-gaap_CostOfRevenue'],
+          # ******* Gross Profit *******************
+          gross_prof = value[concept == 'us-gaap_GrossProfit'],
+          # ******* Operating Exp *******************
+          rNd = value[concept == 'us-gaap_ResearchAndDevelopmentExpense'],
+          sga = value[concept == 'us-gaap_SellingGeneralAndAdministrativeExpense'],
+          totalOpEx = value[concept== 'us-gaap_OperatingExpenses'],
+          # ******* Income From Operations *******************
+          op_income = value[concept == 'us-gaap_OperatingIncomeLoss'],
+          # ******* Misc Income/Exp *******************
+          int_income = value[concept == 'us-gaap_InvestmentIncomeInterest'],
+          int_exp = value[concept == 'us-gaap_InterestExpense'],
+          other_inc_exp = value[concept == 'us-gaap_OtherNonoperatingIncomeExpense'],
+          # ******* Income Before Tax *******************
+          int_preTax = value[concept =='us-gaap_IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest'],
+          taxes = value[concept=='us-gaap_IncomeTaxExpenseBenefit'],
+          # ******* Net Income *******************
+          net_income = value[concept=='us-gaap_ProfitLoss'],
+          ni_attr = value[concept =='us-gaap_NetIncomeLossAttributableToNoncontrollingInterest'],
+          shr_net_income = value[concept == 'us-gaap_NetIncomeLoss'],
+          # ******* EPS *******************
+          basic_shrs = value[concept == 'us-gaap_WeightedAverageNumberOfSharesOutstandingBasic'],
+          diluted_shrs = value[concept == 'us-gaap_WeightedAverageNumberOfDilutedSharesOutstanding'],
+          basic_eps = value[concept == 'us-gaap_EarningsPerShareBasic'],
+          diluted_eps = value[concept == 'us-gaap_EarningsPerShareDiluted']
+  ) 
+
+# basic/diluted EPS did not return values - manually calculate
+is_tbl$basic_eps  <- round(is_tbl$shr_net_income/is_tbl$basic_shrs,4)
+is_tbl$diluted_eps<- round(is_tbl$shr_net_income/is_tbl$diluted_shrs,4)
+
+```
+
+## Income Statement - Long Form 
+
+```{r longIS, echo=FALSE}
+# format/transpose income statement
+long_is <- is_tbl %>% dplyr::mutate_if(.predicate = is.numeric, scales::dollar) %>%  t()
+# fix column names
+colnames(long_is) <- format(as.Date(long_is[1,]),"%b %d, %Y")
+# drop first row
+long_is <- long_is[-1,]
+# fix row names
+long_is <- as.data.frame(long_is)
+# remove dollar sign from the shares outstanding
+long_is[25,] <- gsub("\\$","",long_is[25,])
+long_is[26,] <- gsub("\\$","",long_is[26,])
+# add appropriate row names
+rownames(long_is) <- c("Auto Sales","Govt Credits","Lease Revenue","Total Auto Revenue","Energy generation","Total Revenues",
+                       "Auto", "Leasing","Total Auto", "Energy and Services", "Total Cost Of Revenues","Gross Profit",
+                       "Research & Dev","SG&A","Total OpEx","Operating Income","Interest Income","Interest Exp","Other Income/Exp",
+                       "Income Before Taxes","Taxes","Net Income","Add. Income/Loss","Net Income to Shareholders","Basic Shares",
+                       "Diluted Shares","Basic EPS","Diluted EPS"
+                       )
+# create report table
+final_kable  <- long_is %>% 
+  kbl( caption = "Tesla, Quarterly Income Statement",align = c("r","c","c","c","c","c")) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kableExtra::column_spec(width = "1in",column = c(2:ncol(long_is))) %>%
+  kableExtra::row_spec(6, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(11, bold = T,hline_after = T,background = "lightblue") %>% 
+  kableExtra::row_spec(12, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(15, bold = T,hline_after = T,background = "lightblue") %>% 
+  kableExtra::row_spec(16, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(20, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(22, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(24, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::pack_rows(group_label = "Revenues", start_row = 1, end_row = 5) %>% 
+  kableExtra::pack_rows(group_label = "Cost Of Revenues", start_row = 7, end_row = 10) %>%
+  kableExtra::pack_rows(group_label = "Operating Expenses", start_row = 13, end_row = 14)%>%
+  kableExtra::pack_rows(group_label = "Interest Income/Expense", start_row = 17, end_row = 19)
+
+# Show table
+final_kable
+
+```
+
+## Income Statement - Short Form 
+
+```{r shortIS, echo=FALSE}
+
+# summarize
+short_tbl <- is_tbl %>% 
+  dplyr::mutate_if(.predicate = is.numeric, scales::label_number(accuracy=0.01, scale_cut=scales::cut_short_scale())) %>% t()
+  
+# fix column names
+colnames(short_tbl) <- format(as.Date(short_tbl[1,]),"%b %d, %Y")
+
+# drop first row
+short_tbl <- short_tbl[-1,]
+
+# fix row names
+short_tbl <- as.data.frame(short_tbl)
+# add appropriate row names
+rownames(short_tbl) <- c("Auto Sales","Govt Credits","Lease Revenue","Total Auto Revenue","Energy generation","Total Revenues",
+                       "Auto", "Leasing","Total Auto", "Energy and Services", "Total Cost Of Revenues","Gross Profit",
+                       "Research & Dev","SG&A","Total OpEx","Operating Income","Interest Income","Interest Exp","Other Income/Exp",
+                       "Income Before Taxes","Taxes","Net Income","Add. Income/Loss","Net Income to Shareholders","Basic Shares",
+                       "Diluted Shares","Basic EPS","Diluted EPS"
+                       )
+# create table
+final_kable  <- short_tbl %>% 
+  kbl( caption = "Tesla, Quarterly Income Statement",align = c("r","c","c","c","c","c")) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kableExtra::column_spec(width = "1in",column = c(2:ncol(short_tbl))) %>%
+  kableExtra::row_spec(6, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(11, bold = T,hline_after = T,background = "lightblue") %>% 
+  kableExtra::row_spec(12, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(15, bold = T,hline_after = T,background = "lightblue") %>% 
+  kableExtra::row_spec(16, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(20, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(22, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(24, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::pack_rows(group_label = "Revenues", start_row = 1, end_row = 5) %>% 
+  kableExtra::pack_rows(group_label = "Cost Of Revenues", start_row = 7, end_row = 10) %>%
+  kableExtra::pack_rows(group_label = "Operating Expenses", start_row = 13, end_row = 14)%>%
+  kableExtra::pack_rows(group_label = "Interest Income/Expense", start_row = 17, end_row = 19)
+# show table
+final_kable
+
+
+```
+
+
+## Income Statement - Percentage of Revenue
+
+```{r pctIS, echo=FALSE}
+
+
+# summarize
+pct_tbl <- income_statement %>% group_by(endDate) %>% 
+          # ******* Sales *******************
+  reframe(Sales = round(value[concept == 'tsla_AutomotiveSalesRevenue']/value[concept == 'us-gaap_Revenues'],4),
+          GovtCredits= round(value[concept == 'tsla_AutomotiveRegulatoryCredits']/value[concept == 'us-gaap_Revenues'],4),
+          LeaseRev= round(value[concept == 'tsla_AutomotiveLeasing']/value[concept == 'us-gaap_Revenues'],4),
+          totalRev = round(value[concept == 'tsla_AutomotiveRevenues']/value[concept == 'us-gaap_Revenues'],4),
+          Energy = round(value[concept == 'us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax']/value[concept == 'us-gaap_Revenues'],4),
+          totalSales = round(value[concept == 'us-gaap_Revenues']/value[concept == 'us-gaap_Revenues'],4),
+          # ******* COGS *******************
+          auto_cogs = round(value[concept == 'tsla_AutomotiveCostOfRevenues']/value[concept == 'us-gaap_Revenues'],4),
+          lease_cogs = round(value[concept == 'us-gaap_DirectCostsOfLeasedAndRentedPropertyOrEquipment']/value[concept == 'us-gaap_Revenues'],4),
+          total_auto_cogs = round(value[concept == 'tsla_AutomotiveCostOfRevenues']/value[concept == 'us-gaap_Revenues'],4),
+          other_cogs = round(value[concept == 'us-gaap_CostOfGoodsAndServicesSold']/value[concept == 'us-gaap_Revenues'],4),
+          total_cogs = round(value[concept == 'us-gaap_CostOfRevenue']/value[concept == 'us-gaap_Revenues'],4),
+          # ******* Gross Profit *******************
+          gross_prof = round(value[concept == 'us-gaap_GrossProfit']/value[concept == 'us-gaap_Revenues'],4),
+          # ******* Operating Exp *******************
+          rNd = round(value[concept == 'us-gaap_ResearchAndDevelopmentExpense']/value[concept == 'us-gaap_Revenues'],4),
+          sga = round(value[concept == 'us-gaap_SellingGeneralAndAdministrativeExpense']/value[concept == 'us-gaap_Revenues'],4),
+          totalOpEx = round(value[concept== 'us-gaap_OperatingExpenses']/value[concept == 'us-gaap_Revenues'],4),
+          # ******* Income From Operations *******************
+          op_income = round(value[concept == 'us-gaap_OperatingIncomeLoss']/value[concept == 'us-gaap_Revenues'],4),
+          # ******* Misc Income/Exp *******************
+          int_income = round(value[concept == 'us-gaap_InvestmentIncomeInterest']/value[concept == 'us-gaap_Revenues'],4),
+          int_exp = round(value[concept == 'us-gaap_InterestExpense']/value[concept == 'us-gaap_Revenues'],4),
+          other_inc_exp = round(value[concept == 'us-gaap_OtherNonoperatingIncomeExpense']/value[concept == 'us-gaap_Revenues'],4),
+          # ******* Income Before Tax *******************
+          int_preTax = round(value[concept=='us-gaap_IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest']/value[concept == 'us-gaap_Revenues'],4),
+          taxes = round(value[concept=='us-gaap_IncomeTaxExpenseBenefit']/value[concept == 'us-gaap_Revenues'],4),
+          # ******* Net Income *******************
+          net_income = round(value[concept=='us-gaap_ProfitLoss']/value[concept == 'us-gaap_Revenues'],4),
+          ni_attr = round(value[concept =='us-gaap_NetIncomeLossAttributableToNoncontrollingInterest']/value[concept == 'us-gaap_Revenues'],4),
+          shr_net_income = round(value[concept == 'us-gaap_NetIncomeLoss']/value[concept == 'us-gaap_Revenues'],4)
+  )  %>% 
+  dplyr::mutate_if(.predicate = is.numeric, scales::percent) %>% t()
+  
+# fix column names
+colnames(pct_tbl) <- format(as.Date(pct_tbl[1,]),"%b %d, %Y")
+
+# drop first row
+pct_tbl <- pct_tbl[-1,]
+
+# fix row names
+pct_tbl <- as.data.frame(pct_tbl)
+# add appropriate row names
+rownames(pct_tbl) <- c("Auto Sales","Govt Credits","Lease Revenue","Total Auto Revenue","Energy generation","Total Revenues",
+                       "Auto", "Leasing","Total Auto", "Energy and Services", "Total Cost Of Revenues","Gross Profit",
+                       "Research & Dev","SG&A","Total OpEx","Operating Income","Interest Income","Interest Exp","Other Income/Exp",
+                       "Income Before Taxes","Taxes","Net Income","Add. Income/Loss","Net Income to Shareholders"
+                       )
+# create table
+final_kable  <- pct_tbl %>% 
+  kbl( caption = "Tesla, Quarterly Income Statement (As a Percentage of Total Revenue)",align = c("r","c","c","c","c","c")) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kableExtra::column_spec(width = "1in",column = c(2:ncol(pct_tbl))) %>%
+  kableExtra::row_spec(6, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(11, bold = T,hline_after = T,background = "lightblue") %>% 
+  kableExtra::row_spec(12, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(15, bold = T,hline_after = T,background = "lightblue") %>% 
+  kableExtra::row_spec(16, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(20, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(22, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::row_spec(24, bold = T,hline_after = T,background = "lightgray") %>% 
+  kableExtra::pack_rows(group_label = "Revenues", start_row = 1, end_row = 5) %>% 
+  kableExtra::pack_rows(group_label = "Cost Of Revenues", start_row = 7, end_row = 10) %>%
+  kableExtra::pack_rows(group_label = "Operating Expenses", start_row = 13, end_row = 14)%>%
+  kableExtra::pack_rows(group_label = "Interest Income/Expense", start_row = 17, end_row = 19)
+# show table
+final_kable
+```

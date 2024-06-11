@@ -1,0 +1,216 @@
+---
+title: "Option Historical Pricing"
+output: html_document
+date: "2024-02-15"
+---
+
+```{r setup, include=FALSE}
+require("quantmod");require('stringr');require("data.table");require("httr");require("RQuantLib")
+```
+
+## Build Function
+Please get the `crumb` value along with the `cookie` & place them in the appropriate place.
+```{r cars}
+#'@param und      underlying symbol
+#'@param exp      expiration data, format: "2024-02-15"
+#'@param type     call or put ex. 'C' for call / 'P' for put
+#'@param strk     strike price ex. 500.00
+#'@param from     from date ex. '2024-01-01'
+#'@param to       to date ex. '2024-02-15'
+
+getOpHistYF = function(und, exp, strk, type, from, to){
+  # format STRIKE
+  STRIKE = as.numeric(round(strk,2)*100)
+  # add leading ZEROS
+  if(str_length(STRIKE) == 5){LEADING0 = "00";TRAILING0 = "0"}
+  if(str_length(STRIKE) == 4){LEADING0 = "000";TRAILING0 = "0"}
+  if(str_length(STRIKE) == 3){LEADING0 = "0000";TRAILING0 = "0"}
+  if(str_length(STRIKE) == 2){LEADING0 = "00000";TRAILING0 = "0"}
+  
+  # build yahoo finance strike - add 0's to accomodate strike
+  yf_strike = paste0(LEADING0, #paste(rep(0,5-str_length(as.integer(STRIKE))),collapse = ""),
+                    STRIKE,
+                    TRAILING0, #paste(rep(0,6-str_length(as.integer(STRIKE))),collapse = ""),
+                    collapse = "")
+  # build yahoo finance symbol - add underlying symbol, expiration, and type
+  sym = paste0(und,format(as.Date(exp),'%y%m%d'),type, yf_strike,collapse = "")
+  # build URL - keeping the same Crumb
+  URL = paste0('https://query1.finance.yahoo.com/v8/finance/chart/',sym,'?symbol=',sym,
+               '&period1=',as.numeric(as.POSIXct(from,origin = "1970-01-01")),'&period2=',
+               as.numeric(as.POSIXct(to,origin = "1970-01-01")),'&useYfid=true&interval=',
+               '1d&includePrePost=false&events=div|split|earn&lang=en-US&region=US&crumb=INSERT_CRUMB_HERE&corsDomain=finance.yahoo.com')
+  # get request
+  pg = httr::GET(url=URL, 
+            config = httr::add_headers(
+              `Host` = 'query1.finance.yahoo.com',
+              `User-Agent` = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0',
+              `Accept` = '*/*',
+              `Accept-Language` = 'en-US,en;q=0.5',
+              `Accept-Encoding` = 'gzip, deflate, br',
+              `Referer` = 'https://finance.yahoo.com/quote/SPY240215C00500000/chart?nn=1',
+              `Origin` = 'https://finance.yahoo.com',
+              `Connection` = 'keep-alive',
+              `Cookie` = 'PLACE_COOKIE_VALUE_HERE',
+              `Sec-Fetch-Dest` = 'empty',
+              `Sec-Fetch-Mode` = 'cors',
+              `Sec-Fetch-Site` = 'same-site',
+              `TE` = 'trailers'
+                  )
+            )
+  # get page contents
+  dt <- httr::content(pg)
+  # get timestamps
+  DATES = as.Date(as.POSIXct(as.numeric(do.call(rbind,dt[["chart"]][["result"]][[1]][["timestamp"]])),origin = "1970-01-01"))
+  # reclass columns since it returned lists
+  DATA = data.frame(Open  = as.numeric(as.character(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]][["open"]])),
+                    High  = as.numeric(as.character(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]][["high"]])),
+                    Low   = as.numeric(as.character(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]][["low"]])),
+                    Close = as.numeric(as.character(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]][["close"]])),
+                    Volume =as.numeric(as.character(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]][["volume"]]))
+  ) %>% suppressWarnings() %>% suppressMessages()
+  
+  # get data
+  #DATA  = as.data.frame(rbindlist(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]])) %>% suppressWarnings() %>% suppressMessages()))
+  # drop any NULL rows
+  drop_row = which(DATA$low=='NULL')
+  if(length(drop_row) != 0){
+    DATA  = DATA[!drop_row,]
+    DATES = DATES[DATES != DATES[drop_row]]
+  }
+  # convert to XTS
+  XTS = xts(DATA,order.by = DATES)
+  # round all to 4 decimals
+  XTS <- round(XTS, 4)
+  # replace column names
+  colnames(XTS) = paste0(sym,".",names(DATA))
+  # drop NAs
+  XTS = na.omit(XTS)
+  # return XTS object
+  XTS
+}
+```
+
+## Test Wrapper
+Testing function with different expirations, underlying symbols, & strikes
+```{r wrapperTest, echo=FALSE}
+opt1 <- getOpHistYF(und="SPY" ,exp="2024-02-21",from="2024-01-01",to = "2024-02-15",strk = 500  ,type = "C") 
+opt2 <- getOpHistYF(und="SPY" ,exp="2024-02-23",from="2024-01-15",to = Sys.Date()  ,strk = 500  ,type = "P")
+opt3 <- getOpHistYF(und="TSLA",exp="2024-02-23",from="2024-02-06",to = Sys.Date()  ,strk = 192.5,type = "C")
+opt4 <- getOpHistYF(und="PLTR",exp="2024-03-08",from="2024-02-01",to = Sys.Date()  ,strk = 25.50,type = "P")
+```
+
+## Plot Option History
+```{r charts, echo=FALSE, fig.keep='all'}
+chartSeries(opt1,name = gsub(".Open","",names(opt1)[1]))
+chartSeries(opt2,name = gsub(".Open","",names(opt2)[1]))
+chartSeries(opt3,name = gsub(".Open","",names(opt3)[1]))
+chartSeries(opt4,name = gsub(".Open","",names(opt4)[1]))
+```
+
+
+## INTRADAY OPTIONS
+
+Please get the `crumb` value along with the `cookie` & place them in the appropriate place.
+```{r intradayop}
+#'@param und      underlying symbol
+#'@param exp      expiration data, format: "2024-02-15"
+#'@param type     call or put ex. 'C' for call / 'P' for put
+#'@param strk     strike price ex. 500.00
+
+getIntraOpHistYF = function(und, exp, strk, type){
+  
+  CURRENT_TDAY = Sys.Date()
+  while(!isBusinessDay(calendar = 'UnitedStates/NYSE',dates = CURRENT_TDAY)){
+    CURRENT_TDAY <- RQuantLib::advance(calendar = "UnitedStates/NYSE",dates = CURRENT_TDAY,n = -1,timeUnit = 0)
+    }
+  from = CURRENT_TDAY-(7) #RQuantLib::advance(calendar = "UnitedStates/NYSE",dates = CURRENT_TDAY,n = -6,timeUnit = 0)
+  to = CURRENT_TDAY
+  # format STRIKE
+  STRIKE = as.numeric(round(strk,2)*100)
+  # add leading ZEROS
+  if(str_length(STRIKE) == 5){LEADING0 = "00";TRAILING0 = "0"}
+  if(str_length(STRIKE) == 4){LEADING0 = "000";TRAILING0 = "0"}
+  if(str_length(STRIKE) == 3){LEADING0 = "0000";TRAILING0 = "0"}
+  if(str_length(STRIKE) == 2){LEADING0 = "00000";TRAILING0 = "0"}
+  
+  # build yahoo finance strike - add 0's to accomodate strike
+  yf_strike = paste0(LEADING0, #paste(rep(0,5-str_length(as.integer(STRIKE))),collapse = ""),
+                    STRIKE,
+                    TRAILING0, #paste(rep(0,6-str_length(as.integer(STRIKE))),collapse = ""),
+                    collapse = "")
+  # build yahoo finance symbol - add underlying symbol, expiration, and type
+  sym = paste0(und,format(as.Date(exp),'%y%m%d'),type, yf_strike,collapse = "")
+  # build URL - keeping the same Crumb
+  URL = paste0('https://query1.finance.yahoo.com/v8/finance/chart/',sym,'?symbol=',sym,
+               '&period1=',as.numeric(as.POSIXct(from,origin = "1970-01-01")),'&period2=',
+               as.numeric(as.POSIXct(to,origin = "1970-01-01")),'&useYfid=true&interval=',
+               '1m&includePrePost=false&events=div|split|earn&lang=en-US&region=US&crumb=INSERT_CRUMB_HERE&corsDomain=finance.yahoo.com')
+  # get request
+  pg = httr::GET(url=URL, 
+            config = httr::add_headers(
+              `Host` = 'query1.finance.yahoo.com',
+              `User-Agent` = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0',
+              `Accept` = '*/*',
+              `Accept-Language` = 'en-US,en;q=0.5',
+              `Accept-Encoding` = 'gzip, deflate, br',
+              `Referer` = 'https://finance.yahoo.com/quote/SPY240215C00500000/chart?nn=1',
+              `Origin` = 'https://finance.yahoo.com',
+              `Connection` = 'keep-alive',
+              `Cookie` = 'GET_COOKIE_VALUE',
+              `Sec-Fetch-Dest` = 'empty',
+              `Sec-Fetch-Mode` = 'cors',
+              `Sec-Fetch-Site` = 'same-site',
+              `TE` = 'trailers'
+                  )
+            )
+  # get page contents
+  dt <- httr::content(pg)
+  # get timestamps
+  DATES = as.POSIXct(as.numeric(do.call(rbind,dt[["chart"]][["result"]][[1]][["timestamp"]])),origin = "1970-01-01",tz = "America/New_York")
+  # reclass columns since it returned lists
+  DATA = data.frame(Open  = as.numeric(as.character(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]][["open"]])),
+                    High  = as.numeric(as.character(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]][["high"]])),
+                    Low   = as.numeric(as.character(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]][["low"]])),
+                    Close = as.numeric(as.character(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]][["close"]])),
+                    Volume =as.numeric(as.character(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]][["volume"]]))
+  ) %>% suppressWarnings() %>% suppressMessages()
+  
+  # get data
+  #DATA  = as.data.frame(rbindlist(dt[["chart"]][["result"]][[1]][["indicators"]][["quote"]][[1]])) %>% suppressWarnings() %>% suppressMessages()))
+  # drop any NULL rows
+  drop_row = which(DATA$low=='NULL')
+  if(length(drop_row) != 0){
+    DATA  = DATA[!drop_row,]
+    DATES = DATES[DATES != DATES[drop_row]]
+  }
+  # convert to XTS
+  XTS = xts(DATA,order.by = DATES)
+  # round all to 4 decimals
+  XTS <- round(XTS, 4)
+  # replace column names
+  colnames(XTS) = paste0(sym,".",names(DATA))
+  # drop NAs
+  XTS = na.omit(XTS)
+  # keep within market hours
+  XTS = XTS["T0930/T1559"]
+  # return XTS object
+  XTS
+}
+```
+
+## Test Wrapper
+Testing function with different expirations, underlying symbols, & strikes
+```{r wrapperTest2, echo=FALSE}
+opt1 <- getIntraOpHistYF(und="SPY" ,exp="2024-02-16",strk = 500,type = "C")
+opt2 <- getIntraOpHistYF(und="SPY" ,exp="2024-02-16",strk = 500,type = "P")
+opt3 <- getIntraOpHistYF(und="TSLA",exp="2024-02-23",strk = 192.5,type = "C")
+opt4 <- getIntraOpHistYF(und="PLTR",exp="2024-03-08",strk = 25.50,type = "P")
+```
+
+## Plot Option History
+```{r charts2, echo=FALSE, fig.keep='all'}
+chartSeries(opt1,name = gsub(".Open","",names(opt1)[1]))
+chartSeries(opt2,name = gsub(".Open","",names(opt2)[1]))
+chartSeries(opt3,name = gsub(".Open","",names(opt3)[1]))
+chartSeries(opt4,name = gsub(".Open","",names(opt4)[1]))
+```

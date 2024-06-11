@@ -1,0 +1,415 @@
+---
+title: "End-of-Day (EOD) Market Report For:"
+output:
+  html_document:
+    df_print: paged
+geometry: margin=1cm
+date: '`r format(Sys.Date(), "%A, %B %d, %Y")`'
+---
+
+```{=html}
+<style>
+body {
+    position: absolute;
+    left: 0px;}
+</style>
+```
+```{r setup, include=FALSE}
+require("quantmod");require("tinytex");require("DT");require("lubridate");require("PerformanceAnalytics")
+# tinytex::install_tinytex()
+DATE <- Sys.Date()-1
+daytoday <- format(DATE,"%Y%m%d")
+```
+
+## Options Report
+
+EOD Options Report: The following tables will return the end-of-day option market statistics.
+
+```{r options, echo=FALSE}
+  #cat("\nNow Reading TD Options...")
+  ALL <- readRDS(paste0("/Volumes/6TB/TDAPI/OptionChains/ALL-DF/",
+                        format(DATE,"%Y%m%d"),".rds"))
+  #cat("\nNow Formatting TD Options...")
+  ALL$openInterest <- as.numeric(ALL$openInterest)
+  ALL$totalVolume <-  as.numeric(ALL$totalVolume)
+  ALL$quoteTimeInLong <- as.Date(ALL$quoteTimeInLong)
+  #cat("\nNow adding vol2OI to TD Options...")
+  ALL$vol2OI <- ALL$totalVolume/ALL$openInterest
+  ALL$vol2OI[is.infinite(ALL$vol2OI)] <- 0
+  ALL$vol2OI[is.na(ALL$vol2OI)] <- 0
+  ALL$vol2OI[is.nan(ALL$vol2OI)] <- 0
+  #cat("Done!")
+  #cat("\n\n")
+  Vo4Calls = sum(subset(ALL,ALL$putCall=="CALL")$totalVolume)
+  Vo4Puts = sum(subset(ALL,ALL$putCall=="PUT")$totalVolume)
+  Put2CallVo = sum(subset(ALL,ALL$putCall=="PUT")$totalVolume)/sum(subset(ALL,ALL$putCall=="CALL")$totalVolume)
+  OI4Calls= sum(subset(ALL,ALL$putCall=="CALL")$openInterest)
+  OI4Puts = sum(subset(ALL,ALL$putCall=="PUT")$openInterest)
+  Put2CallOI = sum(subset(ALL,ALL$putCall=="PUT")$openInterest)/sum(subset(ALL,ALL$putCall=="CALL")$openInterest)
+  numofSTKS = length(unique(ALL$StockSymbol))
+  OutPut = as.data.frame(cbind(numofSTKS,Vo4Calls,Vo4Puts,Put2CallVo,OI4Calls,OI4Puts,Put2CallOI))
+  #write.table(OutPut, paste0("~/Desktop/UOA/Put2CallTab.csv"), sep=",")
+```
+
+```{r printOptions, echo=FALSE}
+  cat("Total Volume for Calls: ",Vo4Calls)
+  cat("\n")
+  cat("Total Volume for Puts : ", Vo4Puts)
+  cat("\n")
+  cat("Put-to-Call Ratio     : ", Put2CallVo)
+  cat("\n")
+  cat("\n\n")
+  cat("Total Open Interest for Calls  : ", OI4Calls)
+  cat("\n")
+  cat("Total Open Interest for Puts   : ", OI4Puts)
+  cat("\n")
+  cat("Open Interest Put-to-Call Ratio: ", Put2CallOI)
+  cat("\n")
+  #print(maxOp,row.names = FALSE)
+```
+
+```{r largestByVol, echo=FALSE}
+  maxOp <- subset(ALL,ALL$putCall=="CALL")
+  maxOp <- subset(maxOp,maxOp$daysToExpiration>0)
+  maxOp <- maxOp[order(maxOp$totalVolume,decreasing = TRUE),]
+  maxOp <- maxOp[1:20,]
+  #maxOp <- maxOp[which.max(maxOp$totalVolume),]
+  maxOp <- maxOp[,c("StockSymbol","putCall","strikePrice", "expirationDate","daysToExpiration",
+                    "totalVolume","openInterest","vol2OI")]
+  maxOp <- as.data.frame(maxOp,row.names = NULL)
+  cat("\nLargest Call positions by Volume: \n")
+  maxOp$vol2OI <- round(maxOp$vol2OI,2)
+  maxOp$expirationDate <- as.character(as.Date(maxOp$expirationDate))
+  DT::datatable(maxOp,rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+  # *********************************************************************************************
+  # *********************************************************************************************
+  maxOp <- subset(ALL,ALL$putCall=="PUT")
+  maxOp <- subset(maxOp,maxOp$daysToExpiration>0)
+  maxOp <- maxOp[order(maxOp$totalVolume,decreasing = TRUE),]
+  maxOp <- maxOp[1:20,]
+  #maxOp <- maxOp[which.max(maxOp$totalVolume),]
+  maxOp <- maxOp[,c("StockSymbol","putCall","strikePrice", "expirationDate","daysToExpiration",
+                    "totalVolume","openInterest","vol2OI")]
+  maxOp <- as.data.frame(maxOp,row.names = NULL)
+  cat("\nLargest Put positions by Volume: \n")
+  maxOp$vol2OI <- round(maxOp$vol2OI,2)
+  maxOp$expirationDate <- as.character(as.Date(maxOp$expirationDate))
+  DT::datatable(maxOp,rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+```
+
+```{r UOA, echo=FALSE}
+   maxOp <- subset(ALL,ALL$putCall=="CALL")
+  maxOp <- subset(maxOp,maxOp$daysToExpiration>0)
+  maxOp <- maxOp[order(maxOp$openInterest,decreasing = TRUE),]
+  
+  tmp <- subset(maxOp,maxOp$StockClose < 20)
+  tmp <- subset(tmp,tmp$daysToExpiration < 31)
+  tmp <- subset(tmp,tmp$inTheMoney == "FALSE")
+  tmp <- subset(tmp, tmp$deliverableNote == "")
+  tmp <- subset(tmp, tmp$settlementType == " ")
+  tmp <- subset(tmp, tmp$openInterest > 1000)
+  tmp <- subset(tmp, tmp$multiplier == 100)
+  tmp <- subset(tmp, tmp$nonStandard == "FALSE")
+  tmp$percentChange <- tmp$percentChange/100
+  tmp$markPercentChange <- tmp$markPercentChange/100
+  
+  tmp <- tmp[,c("putCall","symbol","description","bid","ask","last","mark","bidSize","askSize",               
+                "bidAskSize","lastSize","highPrice","lowPrice","openPrice",             
+                "closePrice","totalVolume","tradeTimeInLong","quoteTimeInLong",       
+                "netChange","volatility","delta","gamma","theta",                 
+                "vega","rho","openInterest","timeValue","theoreticalOptionValue",
+                "theoreticalVolatility","strikePrice","expirationDate","daysToExpiration",      
+                "expirationType","lastTradingDay","multiplier","settlementType","deliverableNote",       
+                "isIndexOption","percentChange","markChange","markPercentChange","nonStandard",           
+                "inTheMoney","mini","StockSymbol","StockOpen","StockHigh",             
+                "StockLow","StockClose","StockChange","StockPctChange","StockBid",              
+                "StockBidSize","StockAsk","StockAskSize","StockVolume","Stock52WkHi",           
+                "Stock52WkLo","vol2OI" )]
+  
+  #write.table(tmp,paste0("~/Desktop/UOA/CALLS_",format(DATE, format="%Y%m%d"),".csv"), sep=",")
+  
+  maxOp <- maxOp[1:20,]
+  #maxOp <- maxOp[which.max(maxOp$openInterest),]
+  maxOp <- maxOp[,c("StockSymbol","putCall","strikePrice", "expirationDate","daysToExpiration",
+                    "totalVolume","openInterest","vol2OI")]
+  cat("\nLargest Call positions by Open Interest: \n")
+  maxOp$vol2OI <- round(maxOp$vol2OI,2)
+  maxOp$expirationDate <- as.character(as.Date(maxOp$expirationDate))
+  DT::datatable(maxOp,rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+  # *********************************************************************************************
+  # *********************************************************************************************
+  maxOp <- subset(ALL,ALL$putCall=="PUT")
+  maxOp <- subset(maxOp,maxOp$daysToExpiration>0)
+  maxOp <- maxOp[order(maxOp$openInterest,decreasing = TRUE),]
+  
+  tmp <- subset(maxOp,maxOp$StockClose < 20)
+  tmp <- subset(tmp,tmp$daysToExpiration < 31)
+  tmp <- subset(tmp,tmp$inTheMoney == "FALSE")
+  tmp <- subset(tmp, tmp$deliverableNote == "")
+  tmp <- subset(tmp, tmp$settlementType == " ")
+  tmp <- subset(tmp, tmp$openInterest > 1000)
+  tmp <- subset(tmp, tmp$multiplier == 100)
+  tmp <- subset(tmp, tmp$nonStandard == "FALSE")
+  tmp$percentChange <- tmp$percentChange/100
+  tmp$markPercentChange <- tmp$markPercentChange/100
+  
+  tmp <- tmp[,c("putCall","symbol","description","bid","ask","last","mark","bidSize","askSize",               
+                "bidAskSize","lastSize","highPrice","lowPrice","openPrice",             
+                "closePrice","totalVolume","tradeTimeInLong","quoteTimeInLong",       
+                "netChange","volatility","delta","gamma","theta",                 
+                "vega","rho","openInterest","timeValue","theoreticalOptionValue",
+                "theoreticalVolatility","strikePrice","expirationDate","daysToExpiration",      
+                "expirationType","lastTradingDay","multiplier","settlementType","deliverableNote",       
+                "isIndexOption","percentChange","markChange","markPercentChange","nonStandard",           
+                "inTheMoney","mini","StockSymbol","StockOpen","StockHigh",             
+                "StockLow","StockClose","StockChange","StockPctChange","StockBid",              
+                "StockBidSize","StockAsk","StockAskSize","StockVolume","Stock52WkHi",           
+                "Stock52WkLo","vol2OI" )]
+  
+  # write.table(tmp,paste0("~/Desktop/UOA/PUTS_",format(DATE, format="%Y%m%d"),".csv"), sep=",")
+  # 
+  maxOp <- maxOp[1:20,]
+  #maxOp <- maxOp[which.max(maxOp$openInterest),]
+  maxOp <- maxOp[,c("StockSymbol","putCall","strikePrice", "expirationDate","daysToExpiration",
+                    "totalVolume","openInterest","vol2OI")]
+  cat("\nLargest Put positions by Open Interest: \n")
+  maxOp$vol2OI <- round(maxOp$vol2OI,2)
+  maxOp$expirationDate <- as.character(as.Date(maxOp$expirationDate))
+  DT::datatable(maxOp,rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+
+  
+  maxOp <- subset(ALL,ALL$putCall=="CALL")
+  maxOp <- subset(maxOp,maxOp$daysToExpiration>0)
+  maxOp <- maxOp[order(maxOp$vol2OI,decreasing = TRUE),]
+  maxOp <- maxOp[1:20,]
+  #maxOp <- maxOp[which.max(maxOp$vol2OI),]
+  maxOp <- maxOp[,c("StockSymbol","putCall","strikePrice", "expirationDate","daysToExpiration",
+                    "totalVolume","openInterest","vol2OI")]
+  cat("\nLargest Call positions by Volume-to-OI: \n")
+  maxOp$vol2OI <- round(maxOp$vol2OI,2)
+  maxOp$expirationDate <- as.character(as.Date(maxOp$expirationDate))
+  DT::datatable(maxOp,rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+  # *********************************************************************************************
+  # *********************************************************************************************
+  maxOp <- subset(ALL,ALL$putCall=="PUT")
+  maxOp <- subset(maxOp,maxOp$daysToExpiration>0)
+  maxOp <- maxOp[order(maxOp$vol2OI,decreasing = TRUE),]
+  maxOp <- maxOp[1:20,]
+  #maxOp <- maxOp[which.max(maxOp$vol2OI),]
+  maxOp <- maxOp[,c("StockSymbol","putCall","strikePrice", "expirationDate","daysToExpiration",
+                    "totalVolume","openInterest","vol2OI")]
+  cat("\nLargest Put position by Volume-to-OI: \n")
+  maxOp$vol2OI <- round(maxOp$vol2OI,2)
+  maxOp$expirationDate <- as.character(as.Date(maxOp$expirationDate))
+  DT::datatable(maxOp,rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+  
+  comprss <- function(tx) { 
+    div <- findInterval(as.numeric(gsub("\\,", "", tx)), 
+                        c(0, 1e3, 1e6, 1e9, 1e12) )  # modify this if negative numbers are possible
+    paste(round( as.numeric(gsub("\\,","",tx))/10^(3*(div-1)), 2), 
+          c("","K","M","B","T")[div] )}
+  STATS<- readRDS(paste0("/Volumes/6TB/optionStats/",format(DATE,"%Y%m%d"),".rds"))
+  vRAT  <- subset(STATS,STATS$callRATIO < Inf & STATS$callRATIO > 0)
+  vRAT2 <- subset(STATS,STATS$putRATIO < Inf & STATS$putRATIO > 0)
+  vRAT <- vRAT[order(vRAT$callRATIO,decreasing = TRUE),]
+  vRAT2 <- vRAT2[order(vRAT2$putRATIO,decreasing = TRUE),]
+  vRAT <- vRAT[1:50,]
+  vRAT2 <- vRAT2[1:50,]
+  vRAT$callDollarVol <- comprss(vRAT$callDollarVol)
+  vRAT$putDollarVol <- comprss(vRAT$putDollarVol)
+  vRAT$callDollarOI <- comprss(vRAT$callDollarOI)
+  vRAT$putDollarOI <- comprss(vRAT$putDollarOI)
+  vRAT2$callDollarVol <- comprss(vRAT2$callDollarVol)
+  vRAT2$putDollarVol <- comprss(vRAT2$putDollarVol)
+  vRAT2$callDollarOI <- comprss(vRAT2$callDollarOI)
+  vRAT2$putDollarOI <- comprss(vRAT2$putDollarOI)
+  cat("\nHigh CALL Dollar Vol to PUT Dollar Vol:\n")
+  vRAT$callRATIO <- round(vRAT$callRATIO,2)
+  vRAT$putRATIO <- round(vRAT$putRATIO,2)
+  vRAT$tradeDate <- as.character(as.Date(vRAT$tradeDate))
+  DT::datatable(vRAT,rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+  cat("\nHigh PUT Dollar Vol to CALL Dollar Vol:\n")
+  vRAT2$callRATIO <- round(vRAT2$callRATIO,2)
+  vRAT2$putRATIO <- round(vRAT2$putRATIO,2)
+  vRAT2$tradeDate <- as.character(as.Date(vRAT2$tradeDate))
+  DT::datatable(vRAT2,rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+  cat("\nTop 100 by Total Option Market Volume: ")
+  STATS<-STATS[order(STATS$pctOfTotalVol,decreasing = TRUE),]
+  DT::datatable(head(STATS,100),rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+  
+```
+
+### Largest changes in Open Interest
+
+The Following options have the largest change in open interest during the previous 5 sessions:
+
+-   First 5 Columns are the changes in OI over the 5 Trading Dates
+-   **SUM** : The total sum of OI over the previous 5 sessions
+-   **Name** : The full option contract's name
+-   **START_PRC** : The starting price of the option on Day #1
+-   **LAST_PRC** : The EOD option price on Day #5
+-   **DOLLAR_CHANGE** : The difference between LAST_PRC and START PRICE
+-   **PCT_CHANGE** : Percentage change of the option over the 5 sessions
+-   **SYMBOL** : Underlying symbol
+-   **STRIKE** : Strike price of the option
+-   **EXPIRY** : Expiration date for the option contract
+-   **FLAG** : ***C*** is Call & ***P*** is Put
+-   **VWAPVO** : VWAP calculated over the 5 sessions based on Volume
+-   **VWAPOI** : VWAP calculated over the 5 sessions based on Open Interest
+-   **LAST2VWAPVO** : Difference between the current option price and the VWAP (based on Volume) - lets us know if the majority of purchasers are up on the position or not.
+-   **LAST2VWAPOI** : Difference between the current option price and the VWAP (based on Open Interest) - lets us know if the majority of purchasers are up on the position or not.
+-   **WORTH** : Option contract worth - calculated by multiplying Last Price x 100 x SUM
+-   **PnL** : The PnL for these option holders - calculated by multiplying DOLLAR_CHANGE x 100 x SUM
+-   **PnL2VWAPVO** : The PnL based on the VWAP (volume). Lets us know how much these option holders have made over the previous 5 sessions - calculated by multiplying LAST2VWAPVO x 100 x SUM
+-   **PnL2VWAPOI** : The PnL based on the VWAP (open interest). Lets us know how much these option holders have made over the previous 5 sessions - calculated by multiplying LAST2VWAPOI x 100 x SUM
+-   **SHARESifEXERCISED** : (Experimental) Number of total shares if exercised - calculated by multiplying SUM x 100
+-   **SHARESbotSTRIKE** : (Experimental) Exercised Shares (previous column) x Strike Price
+
+```{r oiDelta, echo=FALSE}
+
+PUTS <- readRDS(paste0("/Volumes/6TB/CBOE/STATS/PUTS/",daytoday,".rds"))
+CALLS <- readRDS(paste0("/Volumes/6TB/CBOE/STATS/CALLS/",daytoday,".rds"))
+
+CALLS <- CALLS[order(CALLS$SUM,decreasing = TRUE),]
+PUTS <- PUTS[order(PUTS$SUM,decreasing = TRUE),]
+cat("\nLargest Change in Open Interest For Calls: \n")
+DT::datatable(head(CALLS,50),rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+cat("\nLargest Change in Open Interest For Puts: \n")
+DT::datatable(head(PUTS,50),rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+
+```
+
+### Stocks
+
+The following shows stats on major US indices: \$SPY, \$DIA, \$QQQ ,\$IWM, \$MDY
+
+```{r stockIDXData, echo=FALSE}
+e <- new.env()
+IDX <- c("SPY","DIA","QQQ","IWM","MDY")
+getSymbols(IDX,env = e, from=DATE-lubridate::years(1))
+ALL <- do.call(merge,eapply(e,Ad))
+colnames(ALL) <- gsub(".Adjusted","",names(ALL))
+RETS <- ROC(ALL)
+cat("\nYTD Index Performance: ")
+charts.PerformanceSummary(RETS[format(DATE,"%Y")],main = "YTD Performance")
+```
+
+**Index Performance:**
+
+```{r stockIDXmetrics, echo=FALSE}
+  # daily return
+  dRET <- tail(RETS,1)
+  # weekly return
+  wRET <- tail(do.call(merge,lapply(as.list(1:ncol(ALL)), function(ii) weeklyReturn(ALL[,ii]))),1)
+  colnames(wRET) <- names(ALL)
+  # monthly return
+  mRET <- tail(do.call(merge,lapply(as.list(1:ncol(ALL)), function(ii) monthlyReturn(ALL[,ii]))),1)
+  colnames(mRET) <- names(ALL)
+  # yearly return
+  yRET <- tail(do.call(merge,lapply(as.list(1:ncol(ALL)), function(ii) yearlyReturn(ALL[,ii]))),1)
+  colnames(yRET) <- names(ALL)
+  # quarterly return
+  qRET <- tail(do.call(merge,lapply(as.list(1:ncol(ALL)), function(ii) quarterlyReturn(ALL[,ii]))),1)
+  colnames(qRET) <- names(ALL)
+  # return as data frame
+  TBL <- as.data.frame(rbind(coredata(dRET),coredata(wRET),coredata(mRET),coredata(qRET),coredata(yRET)))
+  TBL <- round(TBL*100,2)
+  rownames(TBL) <- c("daily","weekly","monthly","quarterly","YTD")
+  
+  cat("\nExpressed as a percentage (0.00 %): \n")
+  DT::datatable(t(TBL),rownames = TRUE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+
+```
+
+The following shows stats on international indices:
+
+**Developed Markets:**
+
+1.  \$EWA - Australia
+2.  \$EWO - Austria
+3.  \$EWK - Belgium
+4.  \$EWC - Canada
+5.  \$EDEN- Denmark
+6.  \$EFNL - Finland
+7.  \$EWQ - France
+8.  \$EWG - Germany
+9.  \$EWH - Hong Kong
+10. \$EIRL - Ireland
+11. \$EIS - Israel
+12. \$EWI - Italy
+13. \$EWJ - Japan
+14. \$EWN - Netherlands
+15. \$ENZL - New Zealand
+16. \$EWS - Singapore
+17. \$EWP - Spain
+18. \$EWD - Sweden
+19. \$EWL - Switzerland
+20. \$EWU - United Kingdom
+
+**Emerging Markets:**
+
+1.  \$AGT - Argentina
+2.  \$EWZ - Brazil
+3.  \$ECH - Chile
+4.  \$FXI - China
+5.  \$ICOL - Colombia
+6.  \$INDA - India
+7.  \$EIDO - Indonesia
+8.  \$KWT - Kuwait
+9.  \$EWM - Malaysia
+10. \$EWW - Mexico
+11. \$EPU - Peru
+12. \$EPHE - Philippines
+13. \$EPOL - Poland
+14. \$QAT - Qatar
+15. \$KSA - Saudi Arabia
+16. \$EZA - South Africa
+17. \$EWY - South Korea
+18. \$EWT - Taiwan
+19. \$THD - Thailand
+20. \$TUR - Turkey
+21. \$UAE - United Arab Emirates
+
+```{r stockIIDXData, echo=FALSE}
+e <- new.env()
+IIDX <- c("AGT", "ECH", "EDEN","EFNL", "EIDO", "EIRL", "EIS", "ENZL", "EPHE", "EPOL", "EPU", 
+"EWA", "EWC", "EWD", "EWG", "EWH", "EWI", "EWJ", "EWK", "EWL", "EWM", "EWN", "EWO", "EWP", 
+"EWQ", "EWS", "EWT", "EWU", "EWW", "EWY", "EWZ", "EZA", "FXI", "ICOL", "INDA", "KSA", "KWT", 
+"QAT", "THD", "TUR", "UAE" )
+getSymbols(IIDX,env = e, from=DATE-lubridate::years(1)) %>% suppressMessages() %>% suppressWarnings()
+ALL2 <- do.call(merge,eapply(e,Ad))
+colnames(ALL2) <- gsub(".Adjusted","",names(ALL2))
+RETS2 <- ROC(ALL2)
+```
+
+```{r stokIIDXSummary, echo=FALSE}
+  # get the to 5 best performing ETFs
+  BEST <- colSums(RETS2[format(DATE,"%Y")],na.rm = TRUE)
+  BEST <- BEST[order(BEST,decreasing = TRUE)[1:5]]
+
+  cat("\nBest Performing International Indices: ")
+  charts.PerformanceSummary(RETS2[,names(BEST)][format(DATE,"%Y")],main = "YTD Performance",cex.legend=0.50,cex.axis=0.50)
+
+ # daily return
+  dRET2 <- tail(RETS2,1)
+  # weekly return
+  wRET2 <- tail(do.call(merge,lapply(as.list(1:ncol(ALL2)), function(ii) weeklyReturn(ALL2[,ii]))),1)
+  colnames(wRET2) <- names(ALL2)
+  # monthly return
+  mRET2 <- tail(do.call(merge,lapply(as.list(1:ncol(ALL2)), function(ii) monthlyReturn(ALL2[,ii]))),1)
+  colnames(mRET2) <- names(ALL2)
+  # yearly return
+  yRET2 <- tail(do.call(merge,lapply(as.list(1:ncol(ALL2)), function(ii) yearlyReturn(ALL2[,ii]))),1)
+  colnames(yRET2) <- names(ALL2)
+  # quarterly return
+  qRET2 <- tail(do.call(merge,lapply(as.list(1:ncol(ALL2)), function(ii) quarterlyReturn(ALL2[,ii]))),1)
+  colnames(qRET2) <- names(ALL2)
+  # return as data frame
+  TBL2 <- as.data.frame(rbind(coredata(dRET2),coredata(wRET2),coredata(mRET2),coredata(qRET2),coredata(yRET2)))
+  TBL2 <- round(TBL2*100,2)
+  rownames(TBL2) <- c("daily","weekly","monthly","quarterly","YTD")
+  
+  
+  cat("\nExpressed as a percentage (0.00 %): \n")
+  DT::datatable(t(TBL2),rownames = TRUE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))
+```
