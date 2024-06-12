@@ -1,0 +1,92 @@
+---
+title: "Company Description"
+author: "Jason G"
+date: "2023-08-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+require("quantmod");require("rvest");require("stringr");require("xml2")
+```
+
+## Build Function to Scrape Company Profile
+
+We will use YahooFinance's company profile to get the information. It includes:
+1. Sector
+2. Industry
+3. Address
+4. Full Time Employees
+5. Company Description
+
+```{r scraperWrapper}
+
+getProfile = function(stk){
+  # pause request 
+  Sys.sleep(1)
+  # build url  
+  URL = paste0("https://finance.yahoo.com/quote/",stk,"/profile?p=",stk)
+  # read in page
+  pg = read_html(URL)
+  # get company headquarters
+  snip = pg %>% html_nodes("div") %>% html_nodes("p") 
+  # fix issue with <br> and convert to new line
+  xml_find_all(snip, ".//br") %>% xml_add_sibling("p", "\n")
+  xml_find_all(snip, ".//br") %>% xml_remove() 
+  snip = html_text(snip)
+  # split by new lines ("\n")
+  snip = str_split(snip,pattern = "\n")
+  # ***************************************************************************************
+  # Company Address
+  blob1 = as.data.frame(rbind(snip[[1]]))
+  colnames(blob1)[which(str_detect(snip[[1]],pattern = "http"))] = "website"
+  colnames(blob1)[suppressWarnings(which(!is.na(as.numeric(gsub(" ","",snip[[1]])))))] = "phone"
+  colnames(blob1)[length(snip[[1]])-2] = "country"
+  colnames(blob1)[length(snip[[1]])-3] = "city_state_zip"
+  colnames(blob1)[1] = "address"
+  colnames(blob1)[1] = "streetName"
+  # Company Sector, Industry, and Employee Count
+  blob2 = as.data.frame(do.call(cbind,str_split(snip[[2]],":")))
+  colnames(blob2) = blob2[1,]
+  blob2 = blob2[-1,]
+  blob2$`Full Time Employees` = as.numeric(paste(str_extract_all(blob2$`Full Time Employees`,
+                                                                 pattern = "[0-9]")[[1]],
+                                                 collapse = ""))
+  # Company Description all lower case to make search results easier
+  blob3 = as.data.frame(tolower(snip[[3]]))
+  colnames(blob3) = c("description")
+  # ***************************************************************************************
+  as.data.frame(cbind(stk,blob1,blob2,blob3))
+}
+
+```
+
+## Test Wrapper
+
+Testing the wrapper by passing a few ticker symbols
+```{r testWrapper, echo=FALSE}
+tickers = c("AAPL","AMZN","VFS","TSLA","AMC")
+
+ALL = lapply(as.list(tickers), function(x){
+  tmp = try(getProfile(stk=x),silent = TRUE)
+  if(!inherits(tmp,'try-error')) tmp
+})
+
+ALL <- as.data.frame(rbindlist(ALL,use.names = TRUE,fill = TRUE))
+```
+
+## Find by keyword
+
+We will use the company description to find certain key words
+```{r keywords, echo=FALSE}
+# keyword search
+keyWord = c("auto","cars","electric")
+# find all examples matching our keywords
+MATCH = do.call(rbind,lapply(as.list(keyWord), function(x){
+ ALL[str_detect(ALL$description, pattern = x),]  
+}))
+# remove duplicate tickers
+MATCH = MATCH[!duplicated(MATCH$stk),]
+
+View(MATCH)
+```
+

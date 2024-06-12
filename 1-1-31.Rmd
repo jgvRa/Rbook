@@ -1,0 +1,86 @@
+---
+title: "CME Futures Options"
+output: html_document
+date: "2023-12-07"
+---
+
+```{r setup, include=FALSE}
+require("quantmod");require("httr");require("data.table");require("dplyr")
+```
+
+## Input Parameters
+
+The `monthYear` parameter in the URL below could have the following naming scheme:
+ 
+ For `EW2Z23` could stand for:
+ 1. `E`  - base/underlying which is `ES`
+ 2. `W2` - For Week # 2
+ 3. `Z`  - For December
+ 4. `23` - two-digit year 
+
+*side-note, the options we selected here are weeklies. 
+It may be different for end-of-month, american, or monthly option chains
+ 
+The `productId` - is 2916 may be the CME's code for the ES?
+
+```{r baseURL}
+# copy URL
+URL = paste0("https://www.cmegroup.com/CmeWS/mvc/Settlements/Options/Settlements/2916/OOF?",
+             "strategy=DEFAULT&optionProductId=2916&monthYear=EW2Z23&optionExpiration=2916-Z3",
+             "&tradeDate=12/06/2023&pageSize=500&isProtected=&_t=1701980497792")
+
+# paste cookie value here
+COOKIE = 'ak_bmsc=2FFAAFCCE8147ED16F7C6F0474E2C363~000000000000000000000000000000~YAAQF1LIF/nigQGMAQAA54TkRRbTsfBMm2k69cSMHzcL8wqmR4OvZ861mo4cDzDM0IrgmjJ/DANV2cPFSXLHUx6njzIeslJ7Yac3CulwWYKdQbYc+QgFuCacOV6mc+iXPy94K8j79rP3cUgMCHjsyaxutdUWWWvJD9jl4z7/1PE9Wui6cce1KBNjDJAOCqv1KIcyevpCOiGiNtbEvXrVpclPJTYjTR/NCE6Vyg9UxBtxVDv20oEn7StfBLHtqXQTfKMfR9Qx6cVaB/RZS4lzL6pH6jXFVdpbwCVmNIIbIa8PFJy5W9x1/6zy2SCki+v+stvKbNP4mRIFWbS0u3raMGgfqqQcgAz/90rHdvtmygwR64kWFHBZSt3vHZ4Pq6q75gPXVQPIEmVOqJubXCWIR7C2mHF/3LnsaQYEnma4ucy0cKD5KTzP/WjxVl9vZ7i/jK+YBMP+n6U3rvpA/8NV7J9zRU9WtsPvY5u6sePKLuRQOZZW08gQlnND7lt28s3BMR4S4w==; _sfid_848a={%22anonymousId%22:%22081eae8cb950fb25%22%2C%22consents%22:[{%22consent%22:{%22provider%22:%22Consent%20Provider%22%2C%22purpose%22:%22Personalization%22%2C%22status%22:%22Opt%20In%22}%2C%22lastUpdateTime%22:%222023-12-07T20:07:32.073Z%22%2C%22lastSentTime%22:%222023-12-07T20:07:32.083Z%22}]}; _evga_e567={%22uuid%22:%22081eae8cb950fb25%22}; bm_sv=0DCF408784481ADAF0C1EFBFBDA59C12~YAAQBC0tFy2C8NOLAQAAmWlERhbT9i44a8Fi1YxbB7uosNNYqV25DS/WyThGhMk8iAQS0VdF19xS+BTxR3ExfN8CNkyzhxAcgBctYdGpIOgJwvtaEqaPLIKdi863A/ztFCk4F+GVXmEhL7SToY0THbfEQ9g1vjmwGdJdMxD5s7e2LIpy9qAvM7UrOWjspbQq8c0w+JJLIksULYFXKSs/rd2z4pr2OGlQ2eTqiU/WXvnyoZ7I2wt+fCOlXygd2ljMNPxwZQ==~1; kppid=AIdHbGwcNCn; fpestid=zBN2I_zLSHrcSM4sAnJyzcSAQtm-CB834lwQWSZfTiZe2ecYLaP4ND6Wu8RiyLqeWF7ggg; OptanonConsent=isGpcEnabled=0&datestamp=Thu+Dec+07+2023+12%3A21%3A40+GMT-0800+(Pacific+Standard+Time)&version=6.38.0&isIABGlobal=false&hosts=&consentId=31da65ab-e330-43bf-86f0-95ed938ed8ef&interactionCount=2&landingPath=NotLandingPage&groups=C0004%3A1%2CC0002%3A1%2CC0001%3A1%2CC0003%3A1&AwaitingReconsent=false&geolocation=US%3BCA; _gcl_au=1.1.1116591380.1701979654; _rdt_uuid=1701979653965.fd06185c-bc2e-441e-93fe-9fff6315fd90; _scid=1436698c-a0da-4a07-8fa6-7ad4641725ea; _fbp=fb.1.1701979654858.590381294; _tt_enable_cookie=1; _ttp=y4ZTxKSY7hGuvWMWCVVjQSuSlcG; _ga_K5RBZ8QKRC=GS1.1.1701985930.2.0.1701985930.0.0.0; _ga=GA1.1.1378230707.1701979655; _sctr=1%7C1701936000000; _clck=1lxdzpg%7C2%7Cfhc%7C0%7C1436; _ga_L69G7D7MMN=GS1.1.1701985930.2.1.1701985938.52.0.0; _gid=GA1.2.1855673401.1701979656; RT="z=1&dm=www.cmegroup.com&si=0ec74249-e6d9-4164-803c-85765ea47850&ss=lpvmqntm&sl=7&tt=3b6&obo=6&rl=1"; _lr_tabs_-yvmlpa%2Fcme-group={%22sessionID%22:1%2C%22recordingID%22:%225-921174c2-0c8f-40bb-9f77-95c25c1cfd2c%22%2C%22recordingConditionThreshold%22:%2235.135312466635995%22%2C%22webViewID%22:null%2C%22lastActivity%22:1701985938879}; _lr_hb_-yvmlpa%2Fcme-group={%22heartbeat%22:1701985938879}; _lr_uf_-yvmlpa=94481483-7102-4cee-bbce-de60ae717756; popupsCme=%5B%7B%22popupId%22%3A%22CUF-2023-FX-024%22%2C%22date%22%3A1701979741613%7D%5D; OptanonAlertBoxClosed=2023-12-07T20:14:59.188Z; _gat_UA-63130032-1=1; AKA_A2=A; cmeUTMSource=; cmeUTMMedium=; cmeUTMTerm=; cmeUTMCampaign=; cmeUTMContent=; _scid_r=1436698c-a0da-4a07-8fa6-7ad4641725ea; _uetsid=42e7bb50953c11ee80415790ec478d74; _uetvid=42e7b720953c11eeb88d972b72e853cc'
+
+
+```
+
+## GET request
+
+```{r getOps, echo=FALSE}
+
+# get options from CME
+PAGE = httr::GET(url=URL,
+                 config=httr::add_headers(`Host`= "www.cmegroup.com",
+                                          `User-Agent`=" Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:120.0) Gecko/20100101 Firefox/120.0",
+                                          `Accept`= "application/json, text/plain, */*",
+                                          `Accept-Language`= "en-US,en;q=0.5",
+                                          `Accept-Encoding`= "gzip, deflate, br",
+                                          `Referer`= "https://www.cmegroup.com/markets/equities/sp/e-mini-sandp500.settlements.options.html",
+                                          `Connection`= "keep-alive",
+                                          `Cookie`= COOKIE,
+                                          `Sec-Fetch-Dest`= "empty",
+                                          `Sec-Fetch-Mode`= "cors",
+                                          `Sec-Fetch-Site`= "same-origin",
+                                          `TE`= "trailers"))
+
+
+
+
+# status code: 200 ?
+httr::status_code(PAGE)
+```
+
+
+
+```{r readPageContent, echo=FALSE}
+# extract page content
+CONTENT <- httr::content(PAGE)
+# combine all options
+OPS <- as.data.frame(rbindlist(CONTENT$settlements))
+```
+
+
+```{r formatOps, echo=FALSE}
+# format columns 
+OPS$strike <- as.numeric(OPS$strike) %>% suppressWarnings()
+OPS$open <- as.numeric(OPS$open) %>% suppressWarnings()
+OPS$high <- as.numeric(gsub("A","",gsub("B","",OPS$high))) %>% suppressWarnings()
+OPS$low <- as.numeric(gsub("A","",gsub("B","",OPS$low))) %>% suppressWarnings()
+OPS$last <- as.numeric(gsub("A","",gsub("B","",OPS$last))) %>% suppressWarnings()
+OPS$change <- as.numeric(gsub("+","",OPS$change))
+OPS$settle <- as.numeric(OPS$settle) %>% suppressWarnings()
+OPS$volume <- as.numeric(gsub(",","",OPS$volume)) %>% suppressWarnings()
+OPS$openInterest <- as.numeric(gsub(",","",OPS$openInterest)) %>% suppressWarnings()
+OPS <- OPS[!is.na(OPS$strike),]
+```

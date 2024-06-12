@@ -1,0 +1,81 @@
+---
+title: "CME Quotes"
+output: html_document
+date: "2024-01-05"
+---
+
+```{r setup, include=FALSE}
+require("httr");require("rvest");require("jsonlite");require("data.table")
+```
+
+## Build Function
+
+```{r fun, echo=FALSE}
+getFuturesQuotes = function(){
+  
+  url_session = session(url='https://www.cmegroup.com/', user_agent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0'))
+  # pass in current time into URL
+  curTime = round(as.numeric(Sys.time())*1000,0)
+  URL = paste0('https://www.cmegroup.com/CmeWS/mvc/Quotes/ContractsByNumber?isProtected=&_t=',curTime)
+  # add cookie
+  COOKIE = 'PLACE_COOKIE_HERE'
+  # POST request
+  pg = httr::POST(url=URL, 
+                  body = "{\"productIds\":[300,320,312,310,323,22,425,444,424,429,426,452,133,146,318,167,8314,166,37,48,86,58,42,69,8462,303,329,316,7978,307,437,458,446,445,438,7440,8667,8668,5224,9024,2674,10037],\"contractsNumber\":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],\"venue\":\"G\",\"type\":\"VOLUME\",\"showQuarterly\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}",
+                  config = httr::add_headers(
+                    `Host`      = 'www.cmegroup.com',
+                    `User-Agent`= 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0',
+                    `Accept`    = 'application/json, text/plain, */*',
+                    `Accept-Language`= 'en-US,en;q=0.5',
+                    `Accept-Encoding`= 'gzip, deflate, br',
+                    `Referer`= 'https://www.cmegroup.com/',
+                    `Content-Type`= 'application/json',
+                    `Content-Length`= '422',
+                    `Origin`= 'https://www.cmegroup.com',
+                    `Connection`= 'keep-alive',
+                    `Cookie`= COOKIE,
+                    `Sec-Fetch-Dest`= 'empty',
+                    `Sec-Fetch-Mode`= 'cors',
+                    `Sec-Fetch-Site`= 'same-origin',
+                    `TE`= 'trailers'
+                  ), handle = url_session$handle
+  )
+  
+  # extract page content
+  dt <- content(pg)
+  # for each element in the list extract the correct values
+  dt = lapply(as.list(1:length(dt)), function(ii){
+    # get contents & column bind
+    tmp = as.data.frame(do.call(cbind,dt[[ii]]), row.names = FALSE) %>% suppressWarnings()
+    # extract the first row
+    tmp[1,]
+  })
+  # combine all products
+  dt <- as.data.frame(do.call(rbind,dt))
+  # format columns
+  dt$percentageChange <- as.numeric(gsub("\\%","",gsub("\\+","",dt$percentageChange)))/100
+  dt$volume <- as.numeric(gsub("\\,","",dt$volume))
+  dt$updated <- as.POSIXct(gsub("CT<br /> ","", dt$updated), format="%H:%M:%S %d %b %y",tz = "America/Chicago")
+  dt$group <- as.character(dt$group)
+  # return table
+  dt
+}
+
+```
+
+
+
+## Test Function
+
+```{r testFUN, echo=FALSE}
+
+cme_quotes = getFuturesQuotes()
+
+cme_quotes %>% group_by(group) %>% reframe(avgRet = round(mean(percentageChange),5), 
+                                           maxRet=round(max(percentageChange),5), 
+                                           minRet=round(min(percentageChange),5),
+                                           totalVol = sum(volume)) %>% View
+
+
+```
+
