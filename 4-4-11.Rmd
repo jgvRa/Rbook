@@ -1,0 +1,190 @@
+---
+title: "Seasons & Sectors"
+author: "Jason Guevara"
+date: "2024-03-20"
+output: html_document
+---
+```{r setup, include=FALSE}
+require("quantmod");require('PerformanceAnalytics');require("dplyr");require("data.table");require("DT")
+
+# function to get monthly returns
+#'@param stk_ohlcv   = XTS object containing OHLCV prices
+#'@param XTS         = should a monthly XTS object be returned (TRUE/FALSE)
+#'@param excludeNYrs = remove years to avoid 'overfitting' (ex. 3  == to remove last 3 years)
+moReturns = function(stk_ohlcv, XTS, excludeNYrs){
+  # YEARS
+  YRS = unique(format(index(stk_ohlcv),"%Y"))
+  YRS <- YRS[1:(length(YRS)-excludeNYrs)]
+  if(XTS){
+   # for each year subset each month to calculate returns
+    RETS = do.call(rbind,lapply(as.list(YRS), function(YR){
+      # MONTHS 
+      MOS = unique(format(index(stk_ohlcv[paste(YR)]),"%m"))
+      all_mos = do.call(rbind, lapply(as.list(MOS), function(MO){
+        # subset target month
+        targetMo = stk_ohlcv[paste0(YR,MO)]
+        # extract monthly return
+        som = as.numeric(Ad(targetMo)[1]) # start of month price
+        eom = as.numeric(Ad(targetMo)[nrow(targetMo)]) #end of month price
+        RET = round(eom/som-1,4)
+        # return as data frame
+        asXTS <- xts(RET, order.by = index(targetMo[nrow(targetMo)]))
+        colnames(asXTS) = gsub(".Open","",names(targetMo)[1])
+        # return df
+        asXTS
+      }))
+      # return xts
+      all_mos
+    }))
+  }else{
+    # for each year subset each month to calculate returns
+    RETS = lapply(as.list(YRS), function(YR){
+      # MONTHS 
+      MOS = unique(format(index(stk_ohlcv[paste(YR)]),"%m"))
+      all_mos = as.data.frame(do.call(cbind, lapply(as.list(MOS), function(MO){
+        # subset target month
+        targetMo = stk_ohlcv[paste0(YR,MO)]
+        # extract monthly return
+        som = as.numeric(Ad(targetMo)[1]) # start of month price
+        eom = as.numeric(Ad(targetMo)[nrow(targetMo)]) #end of month price
+        RET = round(eom/som-1,4)
+        # return as data frame
+        df <- data.frame(as.numeric(RET))
+        # rename column
+        colnames(df) = format(index(targetMo)[1], "%b")
+        # return df
+        df
+      })))
+      # extract annual return
+      targetYr = stk_ohlcv[paste(YR)]
+      soy = as.numeric(Ad(targetYr)[1]) # start of year price
+      eoy = as.numeric(Ad(targetYr)[nrow(targetYr)]) #end of year price
+      RET = round(eoy/soy-1,4)
+      # add to table
+      all_mos$annual = RET
+      # add year as row name
+      data.frame(Year = YR,all_mos*100)
+    })
+    # return all years
+    RETS <- as.data.frame(rbindlist(RETS, use.names = T,fill = T))
+    # reorder
+    RETS <- RETS[,c("Year","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","annual")]
+  }
+  # returns
+  RETS
+}
+#'@param XTS        = XTS object (returns)
+#'@param select_mos = vector of select months (best months) 
+getSelectMos = function(XTS, select_mos){
+  # for each month passed in, subset returns
+  ALL = lapply(as.list(select_mos), function(x){
+    if(x == 'Jan'){SUB=XTS[.indexmon(XTS)  == 0]}
+    if(x == 'Feb'){SUB=XTS[.indexmon(XTS)  == 1]}
+    if(x == 'Mar'){SUB=XTS[.indexmon(XTS)  == 2]}
+    if(x == 'Apr'){SUB=XTS[.indexmon(XTS)  == 3]}
+    if(x == 'May'){SUB=XTS[.indexmon(XTS)  == 4]}
+    if(x == 'Jun'){SUB=XTS[.indexmon(XTS)  == 5]}
+    if(x == 'Jul'){SUB=XTS[.indexmon(XTS)  == 6]}
+    if(x == 'Aug'){SUB=XTS[.indexmon(XTS)  == 7]}
+    if(x == 'Sep'){SUB=XTS[.indexmon(XTS)  == 8]}
+    if(x == 'Oct'){SUB=XTS[.indexmon(XTS)  == 9]}
+    if(x == 'Nov'){SUB=XTS[.indexmon(XTS)  == 10]}
+    if(x == 'Dec'){SUB=XTS[.indexmon(XTS)  == 11]}
+  # return subset
+    SUB
+  })
+  # row bind all
+  do.call(rbind,ALL)
+}
+```
+
+## SPY
+```{r ,echo=FALSE}
+# assign ticker here
+ETF <- "SPY"
+stk_ohlcv = getSymbols(ETF,from="1990-01-01",to=Sys.Date()+1,auto.assign = FALSE)
+# calculate returns
+stk_rets = moReturns(stk_ohlcv, XTS=FALSE,excludeNYrs=0)
+# print tables
+avgXmo = as.data.frame(colMeans(stk_rets[,2:ncol(stk_rets)], na.rm = T))
+setDT(stk_rets)[, c(2:ncol(stk_rets)) := lapply (.SD, function(x) round(as.numeric(x),2)), .SDcols=c(2:ncol(stk_rets))]
+DT::datatable(stk_rets,rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('csv', 'pdf')))
+DT::datatable(round(t(avgXmo),2),rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('csv',  'pdf')))
+```
+
+## Invest in "Good" months only
+
+```{r , echo=FALSE}
+# get monthly returns XTS
+spy_rets <- moReturns(stk_ohlcv = stk_ohlcv, XTS=TRUE,excludeNYrs=0)
+# best months (over 1%)
+select_mos <- which(avgXmo > 1)
+select_mos <- rownames(avgXmo)[select_mos]
+select_mos = select_mos[!(select_mos %in% "annual")] # remove annual
+# select best months from xts
+best_mos <- getSelectMos(XTS=spy_rets, select_mos = select_mos)
+# merge/chart returns
+VS = merge(spy_rets, best_mos) 
+# format column names
+colnames(VS) = c("buyNhold","bestMos") 
+# fill NA's with 0 
+VS[is.na(VS)]<-0
+# plot performance
+charts.PerformanceSummary(VS, geometric = FALSE,main = "Buy-and-Hold Vs Best Months")
+```
+
+
+## Find Investments for Off Months
+
+```{r , echo=FALSE}
+# SPDRS Select Sectors + short term bonds + inverse SPY + SPY
+ETFS <- c("XLC","XLY","XLP","XLE","XLF","XLV","XLI","XLB","XLRE","XLK","XLU","BSV","SH","SPY")
+# for each ETF get avg return tables
+ALL = as.data.frame(do.call(rbind,lapply(as.list(ETFS), function(x){
+stk_ohlcv = getSymbols(x,from="1990-01-01",to=Sys.Date()+1,auto.assign = FALSE)
+# calculate returns
+stk_rets = moReturns(stk_ohlcv = stk_ohlcv, XTS = FALSE,excludeNYrs=3)
+# summarize
+avgXmo = as.data.frame(colMeans(stk_rets[,2:ncol(stk_rets)], na.rm = T))
+avgXmo = data.frame(t(avgXmo),row.names = NULL)
+avgXmo <- round(avgXmo,4)
+# add stock symbol
+avgXmo$symbol <- x
+# return df
+avgXmo
+})))
+# print tables
+setDT(ALL)[, c(1:13) := lapply (.SD, function(x) round(as.numeric(x),2)), .SDcols=c(1:13)]
+DT::datatable(ALL,rownames = FALSE,extensions = "Buttons", options = list(dom="Blfrtip", buttons = c('csv',  'pdf')))
+```
+
+## Get Returns
+
+```{r , echo=FALSE}
+# extract returns for the best ETF each month
+ALL <- as.data.frame(ALL)
+best_sectors = do.call(rbind,lapply(as.list(1:12), function(i){
+  # extract stock symbol + month 
+  this_sym = ALL$symbol[which.max(ALL[,i])]
+  this_mon = names(ALL[i])
+  # get OHLCV data
+  stk_ohlcv<- getSymbols(this_sym, from="1990-01-01",auto.assign = FALSE)
+  # get monthly returns XTS
+  spy_rets <- moReturns(stk_ohlcv = stk_ohlcv, XTS=TRUE,excludeNYrs=0)
+  # only select the best months
+  best_mos <- getSelectMos(XTS=spy_rets, select_mos = this_mon)
+  colnames(best_mos) = "STRAT"
+  best_mos
+}))
+# merge/chart returns
+VS = merge(spy_rets, best_sectors) 
+# format column names
+colnames(VS) = c("buyNhold","Strat") 
+# fill NA's with 0 
+VS[is.na(VS)]<-0
+# plot performance
+charts.PerformanceSummary(VS[paste0(index(best_sectors[1]),"::")], geometric = FALSE,main = "Buy-and-Hold Vs Best Months")
+charts.PerformanceSummary(VS[paste0("2022::")], geometric = FALSE,main = "Out-Of-Sample Returns")
+charts.PerformanceSummary(VS[paste0("2024")], geometric = FALSE,main = "Out-Of-Sample Returns - Current Yr")
+```
+

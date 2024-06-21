@@ -1,0 +1,57 @@
+---
+title: "Stock Market Vs Election Years"
+output: html_document
+date: "2023-12-14"
+---
+This script will analyze a set of stocks & see how well they perform during election years
+
+```{r setup, include=FALSE}
+require("quantmod");require("PerformanceAnalytics");require("dplyr");require('plotly');require('RQuantLib')
+```
+
+## Assign Stocks & Get Data
+List the set of stocks you want to track
+```{r getData, echo=FALSE}
+# assign tickers here
+stks = c("BTC-USD","EEM","IWM","USO","QQQ","SPY","TLT","GLD","EUR=X")
+# get daily data -> return as annual returns
+STK_RETS <- lapply(as.list(stks), function(x){
+  # get data
+  tmp <- getSymbols(x, from="1900-01-01", auto.assign = FALSE) %>% suppressWarnings() 
+  # keep NYSE Dates only
+  tmp <- tmp[RQuantLib::isBusinessDay(calendar="UnitedStates/NYSE",dates = index(tmp))]
+  # get annual returns
+  tmp <- annualReturn(Ad(tmp))
+  # rename column
+  colnames(tmp) <- gsub("=","",gsub("\\-","",x))
+  # return XTS
+  tmp
+})
+# merge data
+STK_RETS = do.call(merge,STK_RETS)
+# assign 0 for any NAs
+STK_RETS[is.na(STK_RETS)] <- 0
+# assign election years
+elect_yrs <- year(index(STK_RETS))[year(index(STK_RETS)) %% 4 == 0]
+# subset returns election years only
+elect_rets <- STK_RETS[paste0(elect_yrs)]
+```
+
+## Returns Plots
+```{r sectorPlots, echo=FALSE, fig.keep='last'}
+# plot election years only
+df <- data.frame(date=index(elect_rets),round(coredata(elect_rets),4))
+
+fig <- plot_ly(df, x = ~date, y = ~BTCUSD, type = 'bar', name = 'BTCUSD')
+fig <- fig %>% add_trace(y = ~EEM, name = 'EEM')
+fig <- fig %>% add_trace(y = ~IWM, name = 'IWM')
+fig <- fig %>% add_trace(y = ~USO, name = 'USO')
+fig <- fig %>% add_trace(y = ~QQQ, name = 'QQQ')
+fig <- fig %>% add_trace(y = ~SPY, name = 'SPY')
+fig <- fig %>% add_trace(y = ~TLT, name = 'TLT')
+fig <- fig %>% add_trace(y = ~GLD, name = 'GLD')
+fig <- fig %>% add_trace(y = ~EURX, name = 'EURX')
+
+fig <- fig %>% layout(yaxis = list(title = 'Annual Return'), barmode = 'group')
+fig
+```

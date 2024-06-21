@@ -1,0 +1,119 @@
+---
+title: "Interest Sensitive Stocks"
+author: "Jason Guevara"
+date: "2024-03-27"
+output: html_document
+---
+
+Try to identify which stocks are most sensitive to the Fed Funds Rate
+```{r setup, include=FALSE}
+require("quantmod");require("PerformanceAnalytics");require("RQuantLib");require("pbapply")
+
+# QQQ constituents
+stks = c("MSFT", "AAPL", "NVDA", "AMZN", "META", "AVGO", "GOOGL", "GOOG", "COST", "TSLA", "AMD", "NFLX", "PEP", "ADBE", "LIN", "CSCO", "TMUS", "QCOM", "INTU", "INTC", "AMAT", "CMCSA", "TXN", "AMGN", "ISRG", "HON", "MU", "LRCX", "BKNG", "VRTX", "REGN", "SBUX", "ADP", "MDLZ", "KLAC", "ADI", "PANW", "GILD", "SNPS", "CDNS", "ASML", "PDD", "MELI", "CRWD", "ABNB", "MAR", "CSX", "PYPL", "ORLY", "PCAR", "CTAS", "NXPI", "MNST", "CEG", "ROP", "WDAY", "MRVL", "ADSK", "CPRT", "DXCM", "DASH", "FTNT", "ROST", "MCHP", "ODFL", "LULU", "FAST", "IDXX", "KHC", "AEP", "PAYX", "KDP", "CHTR", "MRNA", "GEHC", "CSGP", "TTD", "AZN", "DDOG", "EXC", "CTSH", "FANG", "EA", "CDW", "BKR", "VRSK", "CCEP", "BIIB", "ON", "TEAM", "ANSS", "XEL", "ZS", "GFS", "DLTR", "MDB", "TTWO", "ILMN", "WBD", "WBA", "SIRI")
+```
+
+## Function to Calculate Rate Sensitivity
+
+```{r , echo=FALSE}
+# get fed funds effective rate
+getSymbols.FRED('DFF', env=.GlobalEnv)
+
+#'@param  STK = stock symbol to use
+#'@param   RATES = Rate XTS object from above 
+#'@param FROM = Date to start regression (ex. "2020-01-01')
+#'@param   TO = Date to end regression (ex. "2020-01-01')
+
+getRateSen = function(STK,RATES,FROM,TO){
+  # get daily stock OHLCV data
+  stk_ohlcv = getSymbols(STK, from="1990-01-01", to=index(RATES[nrow(RATES)])+1, auto.assign = FALSE)
+  # get daily stock returns
+  stk_ret = ROC(Ad(stk_ohlcv))
+  # reformate column name
+  colnames(stk_ret) = gsub(".Adjusted","", names(stk_ret))
+  # merge data with rate data
+  stk_rate = merge(stk_ret, RATES)
+  # subset from lookback period
+  stk_rate = stk_rate[paste0(FROM,"/",TO)]
+  # only want NYSE trading dates
+  stk_rate = stk_rate[isBusinessDay(calendar = "UnitedStates/NYSE",dates = index(stk_rate)),]
+  # let calulate a linear model to extract BETA 
+  res = lm(stk_rate[,1] ~ stk_rate[,2])
+  # extract lm info & return as a data frame
+  data.frame(sym = STK,
+             beta = round(as.numeric(summary(res)$coefficients[1]),5),
+             yInt = round(as.numeric(summary(res)$coefficients[2]),5),
+             pVal_beta = round(as.numeric(summary(res)$coefficients[7]),5),
+             pVal_yInt = round(as.numeric(summary(res)$coefficients[8]),5),
+             r2 = round(as.numeric(summary(res)$r.squared),5))
+}
+```
+
+## Periods of Decreasing Rates
+
+```{r , echo=FALSE, fig.keep='all'}
+# plot periods of decreasing rates
+chartSeries(DFF["2019/202003"], name = "Decreasing Rates Period")
+# pass in all stock symbols
+RATES_DN  = pblapply(as.list(stks), function(x){
+  tmp = try(getRateSen(STK=x, RATES=DFF, FROM = "2019-01-01", TO = "2020-03-31"),silent = T)
+  if(!inherits(tmp, 'try-error')) tmp
+})
+# combine all results
+RATES_DN <- as.data.frame(do.call(rbind, RATES_DN))
+# get highest/lowest BETAS
+MAX_UP <- RATES_DN[which.max(RATES_DN$beta),]
+MAX_DN <- RATES_DN[which.min(RATES_DN$beta),]
+# plot best/worst Betas
+chartSeries(getSymbols(Symbols=MAX_UP$sym,auto.assign=FALSE)["20190101/20200331"],name=paste0("Highest Beta: $",MAX_UP$sym, " | Beta : ",MAX_UP$beta))
+chartSeries(getSymbols(Symbols=MAX_DN$sym,auto.assign=FALSE)["20190101/20200331"],name=paste0("Lowest Beta: $" ,MAX_DN$sym, " | Beta : ",MAX_DN$beta))
+```
+
+
+## Periods of Increasing Rates
+
+```{r , echo=FALSE, fig.keep='all'}
+# plot periods of increasing rates
+chartSeries(DFF["2023/202307"], name = "Decreasing Rates Period")
+# pass in all stock symbols
+RATES_UP  = pblapply(as.list(stks), function(x){
+  tmp = try(getRateSen(STK=x, RATES=DFF, FROM = "2023-01-01", TO = "2023-07-31"),silent = T)
+  if(!inherits(tmp, 'try-error')) tmp
+})
+# combine all results
+RATES_UP <- as.data.frame(do.call(rbind, RATES_UP))
+# get highest/lowest BETAS
+MAX_UP <- RATES_UP[which.max(RATES_UP$beta),]
+MAX_DN <- RATES_UP[which.min(RATES_UP$beta),]
+# plot best/worst Betas
+chartSeries(getSymbols(Symbols=MAX_UP$sym,auto.assign=FALSE)["20230101/20230731"],name=paste0("Highest Beta: $",MAX_UP$sym, " | Beta : ",MAX_UP$beta))
+chartSeries(getSymbols(Symbols=MAX_DN$sym,auto.assign=FALSE)["20230101/20230731"],name=paste0("Lowest Beta: $" ,MAX_DN$sym, " | Beta : ",MAX_DN$beta))
+```
+
+## Estimating Moves
+
+```{r , echo=FALSE, fig.keep='all'}
+
+# statistically significant
+STAT_DN = subset(RATES_DN, RATES_DN$pVal_beta <= 0.05)
+STAT_UP = subset(RATES_UP, RATES_UP$pVal_beta <= 0.05)
+# Estimate moves 
+sym = "FANG"
+# subset results for symbol
+hyp_dn = RATES_DN[match(sym, RATES_DN$sym),]
+hyp_up = RATES_UP[match(sym, RATES_UP$sym),]
+
+# hypothetical Fed Increase/Decrease in Basis-Points
+FED_INC =  0.25
+FED_DEC =  0.75
+# print results
+cat("\n",
+    sprintf("Hypothetical 1-Day Move for $%-4s: \n--------------------------------------",sym),
+    sprintf("\n%-12s: %6s is %6s", "If Rates Decrease by",
+            scales::percent(FED_DEC/100,accuracy=0.01),
+            scales::percent((hyp_dn$beta*FED_DEC)+hyp_dn$yInt,accuracy=0.01)),
+    sprintf("\n%-12s: %6s is %6s", "If Rates Increase by",
+            scales::percent(FED_INC/100,accuracy=0.01),
+            scales::percent((hyp_up$beta*FED_INC)+hyp_up$yInt,accuracy=0.01))
+)
+```

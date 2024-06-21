@@ -1,0 +1,110 @@
+---
+title: "What is working right now?"
+output: html_document
+date: "2024-02-09"
+---
+We attempt to analyze strategy types to see what has been outperforming the market. 
+```{r setup, include=FALSE}
+require("quantmod");require("PerformanceAnalytics");require("dplyr")
+```
+
+## List of Strategies
+
+1. Market Neutral    - `$BTAL` - AGF U.S. Market Neutral Anti-Beta Fund
+2. Min Variance      - `$USMV` - iShares MSCI USA Min Vol Factor ETF
+3. Momentum          - `$MTUM` - iShares MSCI USA Momentum Factor ETF
+4. Income Generation - `$SCHD` - Schwab US Dividend Equity ETF
+5. Growth            - `$VUG`  - Vanguard Growth ETF
+6. Value             - `$VTV`  - Vanguard Value ETF
+7. Merger Arb        - `$MNA`  - IQ Merger Arbitrage ETF
+8. Risk Parity       - `$RPAR` - RPAR Risk Parity ETF
+9. Event Driven      - `$EVNT` - AltShares Event-Driven ETF
+10.Cash              - `$ULST` - SPDR SSgA Ultra Short Term Bond ETF
+
+```{r , echo=FALSE}
+# list etfs
+etfs <- c("BTAL","USMV","MTUM","SCHD","VUG","VTV","MNA","RPAR","EVNT","ULST")
+# assign new env
+e <- new.env()
+# get data
+getSymbols(etfs, from="1990-01-01",env = e)
+# combine adjusted closes
+ALL <- do.call(merge, eapply(e,Ad))
+# format column names
+colnames(ALL) <- gsub(".Adjusted","",names(ALL))
+# start data Q3 2021 - 10/01/2021
+ALL <- ALL["20211001::"]
+# calculate returns
+RETS  <- do.call(merge,lapply(as.list(1:ncol(ALL)), function(i) monthlyReturn(x=ALL[,i])))
+# add column names
+colnames(RETS)<- names(ALL)
+# calculate monthly SHARPE
+SHARPE  <- do.call(merge,lapply(as.list(1:ncol(ALL)), function(i) apply.monthly(x = ROC(ALL[,i]), FUN = function(x){mean(x, na.rm=TRUE)/sd(x,na.rm = T)})))
+colnames(SHARPE)<- names(SHARPE)
+```
+
+## Cumulative Returns
+Returns for all strats.
+```{r , echo=FALSE}
+# plot performance
+charts.PerformanceSummary(RETS, col=rich10equal, cex.legend= 0.55,main = "Cumumlative Returns")
+```
+
+## Ranking System
+We will rank each ETF by Sharpe each period
+```{r , echo=FALSE}
+#'@param topN = number of ETFs to return for the portfolio
+
+getStrat = function(topN){
+  
+  # Find the next period return for the highest Sharpe THIS period
+  do.call(rbind,lapply(as.list(1:(nrow(SHARPE)-1)), function(ROW){
+    # subsest row/current period
+    current_row = SHARPE[ROW,]  
+    next_ret = data.frame(Date=as.character(index(SHARPE[ROW+1,])))
+    etf_names = c()                    
+    # select the returns for each stock
+    for(i in 1:topN){
+      # which is the highest sharpe this period
+      BEST <- which.max(current_row)
+      etf_name <- names(SHARPE[,BEST])
+      this_ret <- RETS[(ROW+1),etf_name]
+      # add to data frame
+      next_ret = cbind(next_ret, round(as.numeric(this_ret),5))
+      colnames(next_ret)[1+i] <- paste0("etf_",i)
+      # add ETF name
+      etf_names = c(etf_names,etf_name)
+      # remove BEST to grab the next highest
+      current_row <- current_row[,-BEST]
+    }
+    cbind(next_ret, assets = paste(etf_names,collapse = "-"))
+  }))
+  
+}
+
+# Portfolio return - we will assume equal weight
+#'@param DF = data.frame returned from previous function
+portRet = function(DF){
+  # remove last column
+  df = DF[,-ncol(DF)]
+  # convert to XTS
+  XTS = xts(df[,2:ncol(df)], order.by = as.Date(DF$Date))
+  # equal-weight
+  XTS = reclass(rowMeans(XTS), match.to = XTS)
+  colnames(XTS) <- "portfolio"
+  # return XTS
+  XTS
+}
+
+```
+
+# Generate Returns
+
+```{r , echo=FALSE}
+# get strategy returns for topN ETFS
+DF = getStrat(topN = 5)
+# convert to XTS
+XTS = portRet(DF=DF)
+# plot returns
+charts.PerformanceSummary(XTS, main="Portfolio Performance")
+```

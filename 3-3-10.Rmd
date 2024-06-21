@@ -1,0 +1,291 @@
+---
+title: "Fear & Greed Index"
+output: html_document
+date: "2024-01-18"
+---
+Index: <https://www.cnn.com/markets/fear-and-greed#fng-faq>
+```{r setup, include=FALSE}
+require("quantmod");require("dplyr");require("RQuantLib");require("scales");require("plotly")
+```
+
+## 1. MARKET MOMENTUM
+
+S&P 500 and its 125-day moving average
+```{r marketMomentum, echo=FALSE}
+# Market Momentum - S&P 500
+market_momo = getSymbols("^GSPC",from="1970-01-01",auto.assign = FALSE)
+# keep business days only
+market_momo = market_momo[isBusinessDay(calendar = "UnitedStates/NYSE",dates = index(market_momo)),]
+# add 150-day MA
+market_momo$ma150 = SMA(Cl(market_momo), n = 150)
+# difference between close and moving avg
+market_momo$sprd = Cl(market_momo)/market_momo$ma150-1
+# remove NAs
+market_momo = na.omit(market_momo)
+# rank spread
+market_momo$rank <- rank(as.numeric(market_momo$sprd))/nrow(market_momo)
+```
+
+## 2. STOCK PRICE STRENGTH
+Get 52-week Hi/Lo from FinViz
+```{r wk52, echo=FALSE}
+# list FinViz Files
+FILES = list.files("/Volumes/6TB/FinViz-Stats",pattern = "20+",full.names = T)
+# for each file extract the Net 52-week's
+wk52 = lapply(as.list(FILES), function(x){
+  # read in file
+  tmp = readRDS(x)
+  # 52-Week Highs
+  wk52_hi = subset(tmp,tmp$Price == tmp$`52W High $`)
+  wk52_lo = subset(tmp,tmp$Price == tmp$`52W Low $`)
+  # create xts
+  xts(round(nrow(wk52_hi)/nrow(wk52_lo),4), order.by = as.Date(tmp$Date[1]))
+})
+# rowbind all
+wk52 = do.call(rbind,wk52)
+# clean data
+wk52 = make.index.unique(wk52, drop = T)
+wk52[is.nan(wk52)] <- 0
+wk52[is.infinite(wk52)] <- 0
+# rename column
+colnames(wk52) = "net52wk"
+# rank
+wk52$rank <- rank(as.numeric(wk52$net52wk))/nrow(wk52)
+#wk52 <- readRDS('wk52.rds')
+```
+
+## 3. STOCK PRICE BREADTH
+Measure of volume for stocks that are up vs the down
+```{r stockPrcBreadth, echo=FALSE}
+# list FinViz Files
+FILES = list.files("/Volumes/6TB/FinViz-Stats",pattern = "20+",full.names = T)
+# for each file extract the Net Volume
+breadth = lapply(as.list(FILES), function(x){
+  # read in file
+  tmp = readRDS(x)
+  # gather by volume
+  tot_vol = tmp %>% reframe(up_vol = sum(Volume[Change >= 0],na.rm = T),
+                        dn_vol = sum(Volume[Change < 0],na.rm = T)
+  )
+  # create xts
+  xts(round(tot_vol$up_vol/tot_vol$dn_vol,4), order.by = as.Date(tmp$Date[1]))
+})
+# rowbind all
+breadth = do.call(rbind,breadth)
+# clean data
+breadth = make.index.unique(breadth, drop = T)
+breadth[is.nan(breadth)] <- 0
+breadth[is.infinite(breadth)] <- 0
+# rename column
+colnames(breadth) = "breadth"
+# rank
+breadth$rank <- rank(as.numeric(breadth$breadth))/nrow(breadth)
+#breadth <- readRDS("breadth.rds")
+```
+
+## 4. PUT AND CALL OPTIONS
+
+Historical Put/Call Ratio
+```{r putCall, echo=FALSE}
+# list computed option stats
+FILES = list.files("/Volumes/6TB/CBOE/market_stats",full.names = T)
+# for each file extract the Put/Call Ratio
+putCall = lapply(as.list(FILES), function(x){
+  # read in file
+  tmp = readRDS(x)
+  # gather by volume
+  pc = subset(tmp,tmp$flag == "P")$totalVolume/subset(tmp,tmp$flag == "C")$totalVolume
+  # create xts
+  xts(round(pc[1],4), order.by = as.Date(tmp$Date[1]))
+})
+# rowbind all
+putCall = do.call(rbind,putCall)
+# clean data
+putCall = make.index.unique(putCall, drop = T)
+putCall[is.nan(putCall)] <- 0
+putCall[is.infinite(putCall)] <- 0
+# rename column
+colnames(putCall) = "putCall"
+# 5-Day Moving average
+putCall$ma5 <- SMA(putCall, n = 5)
+# omit NAs
+putCall <- na.omit(putCall)
+# rank
+putCall$rank <- rank(as.numeric(putCall$ma5))/nrow(putCall)
+#putCall <- readRDS("putCall.rds")
+```
+
+
+## 5. MARKET VOLATILITY
+
+Using VIX and its 50-day moving average
+```{r vix, echo=FALSE}
+# list computed option stats
+VIX = getSymbols("^VIX", from="1970-01-01",auto.assign = FALSE) %>% suppressWarnings() %>% suppressMessages()
+# keep business days only
+VIX = VIX[isBusinessDay(calendar = "UnitedStates/NYSE",dates = index(VIX)),]
+# add 50-day MA
+VIX$ma50 = SMA(Cl(VIX), n = 50)
+# difference between close and moving avg
+VIX$sprd = Cl(VIX)/VIX$ma50-1
+# remove NAs
+VIX = na.omit(VIX)
+# rank spread
+VIX$rank <- rank(as.numeric(VIX$sprd))/nrow(VIX)
+```
+
+
+## 6. SAFE HAVEN DEMAND
+
+Difference in 20-day stock and bond returns
+```{r safeHaven, echo=FALSE}
+#  Get Market returns
+MARKET = getSymbols("^GSPC", from="1970-01-01",auto.assign = FALSE) %>% suppressWarnings() %>% suppressMessages()
+# keep business days only
+MARKET = MARKET[isBusinessDay(calendar = "UnitedStates/NYSE",dates = index(MARKET)),]
+# calculate returns
+MARKET = ROC(Cl(MARKET))
+# get bond returns - 1yr
+getSymbols.FRED(Symbols = "DGS1",env = .GlobalEnv)
+# convert to daily returns
+BONDS = DGS1/100/365
+if(index(tail(BONDS,1)) != index(tail(MARKET,1))){
+  BONDS = na.locf(rbind(BONDS, xts(NA, order.by = index(tail(MARKET,1)))))
+}
+# MARKET VS BONDS
+NET = na.omit(merge(MARKET,BONDS))
+NET = NET[,1]-NET[,2]
+# smooth out using a 20-day MA
+NET$ma20 = SMA(NET[,1], n = 20)
+# rank
+NET$rank <- rank(as.numeric(NET[,1]))/nrow(NET)
+```
+
+## 7. JUNK BOND DEMAND
+
+Yield spread: junk bonds vs. investment grade
+```{r junkBonds, echo=FALSE}
+# get junk bond yields - https://fred.stlouisfed.org/series/BAMLH0A0HYM2EY
+getSymbols.FRED(Symbols = "BAMLH0A0HYM2EY",env = .GlobalEnv)
+# convert to daily returns
+JUNK_BONDS = BAMLH0A0HYM2EY/100/365
+if(index(tail(JUNK_BONDS,1)) != index(tail(MARKET,1))){
+  JUNK_BONDS = na.locf(rbind(JUNK_BONDS, xts(NA, order.by = index(tail(MARKET,1)))))
+}
+# get investment grade yields - https://fred.stlouisfed.org/series/AAA
+getSymbols.FRED(Symbols = "AAA",env = .GlobalEnv)
+# convert to daily returns
+INV_BONDS = AAA/100/365
+if(index(tail(INV_BONDS,1)) != index(tail(MARKET,1))){
+  INV_BONDS = na.locf(rbind(INV_BONDS, xts(NA, order.by = index(tail(MARKET,1)))))
+}
+# NET YIELD
+NET_YIELD = na.omit(merge(JUNK_BONDS,INV_BONDS))
+NET_YIELD = NET_YIELD[,1]-NET_YIELD[,2]
+# rank
+NET_YIELD$rank <- rank(as.numeric(NET_YIELD[,1]))/nrow(NET_YIELD)
+```
+
+## RANK ALL
+We will rank the last observation 
+```{r rankings, echo=FALSE}
+# 1. MARKET MOMENTUM RANK
+f1 <- as.numeric(tail(market_momo$rank,1))
+# 2. STOCK PRICE STRENGTH RANK
+f2 <- as.numeric(tail(wk52$rank,1))
+# 3. STOCK PRICE BREADTH RANK
+f3 <- as.numeric(tail(breadth$rank,1))
+# 4. PUT AND CALL OPTIONS RANK
+f4 <- as.numeric(tail(putCall$rank,1))
+# 5. MARKET VOLATILITY RANK
+f5 <- as.numeric(tail(VIX$rank,1))
+# 6. SAFE HAVEN DEMAND RANK 
+f6 <- as.numeric(tail(NET$rank,1))
+# 7. JUNK BOND DEMAND RANK
+f7 <- as.numeric(tail(NET_YIELD$rank,1))
+# MEAN READING 
+AVG <- mean(c(f1,f2,f3,f4,f5,f6,f7))
+# print results
+cat("\n",sprintf("%-55s", '       Category               | Latest '),
+    "\n",sprintf("%-55s", paste0("1. MARKET MOMENTUM RANK       | ", scales::percent(f1,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("2. STOCK PRICE STRENGTH RANK  | ", scales::percent(f2,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("3. STOCK PRICE BREADTH RANK   | ", scales::percent(f3,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("4. PUT AND CALL OPTIONS RANK  | ", scales::percent(f4,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("5. MARKET VOLATILITY RANK     | ", scales::percent(f5,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("6. SAFE HAVEN DEMAND RANK     | ", scales::percent(f6,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("7. JUNK BOND DEMAND RANK      | ", scales::percent(f7,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("OVERALL RANK................... ", scales::percent(AVG,accuracy = 0.01)))
+)
+
+
+```
+## RANK ALL - PREVIOUS READING
+We will rank the last observation 
+```{r rankings, echo=FALSE}
+# 1. MARKET MOMENTUM RANK
+p1 <- as.numeric(tail(market_momo$rank,2))[1]
+# 2. STOCK PRICE STRENGTH RANK
+p2 <- as.numeric(tail(wk52$rank,2))[1]
+# 3. STOCK PRICE BREADTH RANK
+p3 <- as.numeric(tail(breadth$rank,2))[1]
+# 4. PUT AND CALL OPTIONS RANK
+p4 <- as.numeric(tail(putCall$rank,2))[1]
+# 5. MARKET VOLATILITY RANK
+p5 <- as.numeric(tail(VIX$rank,2))[1]
+# 6. SAFE HAVEN DEMAND RANK 
+p6 <- as.numeric(tail(NET$rank,2))[1]
+# 7. JUNK BOND DEMAND RANK
+p7 <- as.numeric(tail(NET_YIELD$rank,2))[1]
+# MEDIAN READING - (TO EXCLUDE OUTLIERS)
+pAVG <- mean(c(p1,p2,p3,p4,p5,p6,p7))
+# print results
+cat("\n",sprintf("%-55s", '       Category               | Latest '),
+    "\n",sprintf("%-55s", paste0("1. MARKET MOMENTUM RANK       | ", scales::percent(p1,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("2. STOCK PRICE STRENGTH RANK  | ", scales::percent(p2,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("3. STOCK PRICE BREADTH RANK   | ", scales::percent(p3,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("4. PUT AND CALL OPTIONS RANK  | ", scales::percent(p4,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("5. MARKET VOLATILITY RANK     | ", scales::percent(p5,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("6. SAFE HAVEN DEMAND RANK     | ", scales::percent(p6,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("7. JUNK BOND DEMAND RANK      | ", scales::percent(p7,accuracy = 0.01))),
+    "\n",sprintf("%-55s", paste0("OVERALL RANK................... ", scales::percent(pAVG,accuracy = 0.01)))
+)
+
+
+```
+
+## Create Market Gauge
+
+```{r marketGauge, echo=FALSE}
+
+fig <- plot_ly(
+  domain = list(x = c(0, 1), y = c(0, 1)),
+  value = round(AVG,4)*100,
+  title = list(text = "Fear & Greed Index"),
+  type = "indicator",
+  mode = "gauge+number+delta",
+  delta = list(reference = round(pAVG,4)*100),
+  gauge = list(
+    axis =list(range = list(NULL, 100),tickvals = seq(0,100,5)),
+    bar = list(color = "black"),
+    steps = list(
+      list(range = c(0, 24.99), color = "#f44336"),
+      list(range = c(25, 44.99), color = "#ff930f"),
+      list(range = c(45, 54.99), color = "#ffcb2c"),
+      list(range = c(55, 74.99), color = "#53adff"),
+      list(range = c(75, 100), color = "#8fce00")),
+    threshold = list(
+      line = list(color = "red", width = 4),
+      thickness = 0.75,
+      value = round(AVG,4)*100))) 
+
+fig <- fig %>%
+  layout(margin = list(l=20,r=30)) %>%
+  add_annotations(text="Extreme Fear", x=0.17, y=0.35, showarrow=FALSE) %>% 
+  add_annotations(text="Fear", x=0.35, y=0.62, showarrow=FALSE) %>%
+  add_annotations(text="Neutral", x=0.50, y=0.71, showarrow=FALSE) %>%
+  add_annotations(text="Greed", x=0.68, y=0.62, showarrow=FALSE) %>%
+  add_annotations(text="Extreme Greed", x=0.83, y=0.35, showarrow=FALSE)
+
+fig
+
+```

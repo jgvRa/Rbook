@@ -1,0 +1,94 @@
+---
+title: "Interactive World Map"
+author: "Jason Guevara"
+date: "2024-03-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+suppressPackageStartupMessages(require("sp"))
+suppressPackageStartupMessages(require("leaflet"))
+suppressPackageStartupMessages(require("htmltools"))
+suppressPackageStartupMessages(require("geosphere"))
+suppressPackageStartupMessages(require("rvest"))
+suppressPackageStartupMessages(require("dplyr"))
+suppressPackageStartupMessages(require("stringr"))
+# helper functions
+# formats percentages
+toPct<- function(x){round(as.numeric(gsub("%","",x))/100,4)}
+# formats thousands, millions, billions
+formatKMB <- function(x){
+    tmp <- gsub('K', 'e3', x)
+    tmp <- gsub('M', 'e6', tmp)
+    tmp <- gsub('B', 'e9', tmp)
+    as.numeric(tmp)
+}
+```
+
+## Scrape FV Table
+Scrape the Performance Tab of 
+```{r , echo=FALSE}
+url <- "https://finviz.com/groups.ashx?g=country&v=140&o=name"
+COUNTRY <- read_html(url)
+COUNTRY <- COUNTRY  %>% html_nodes("table") %>% .[[8]] %>%html_table(header=TRUE,fill=TRUE)
+COUNTRY <- COUNTRY[,2:ncol(COUNTRY)]
+COUNTRY$Date <- rep(Sys.Date(),nrow(COUNTRY))
+noms <- names(COUNTRY)
+noms <- gsub("/","",noms)
+noms <- gsub(" ","",noms)
+colnames(COUNTRY) <- noms
+COUNTRY$PerfWeek <- suppressWarnings(toPct(COUNTRY$PerfWeek))
+COUNTRY$PerfMonth <- suppressWarnings(toPct(COUNTRY$PerfMonth))
+COUNTRY$PerfQuart <- suppressWarnings(toPct(COUNTRY$PerfQuart))
+COUNTRY$PerfHalf <- suppressWarnings(toPct(COUNTRY$PerfHalf))
+COUNTRY$PerfYear <- suppressWarnings(toPct(COUNTRY$PerfYear))
+COUNTRY$PerfYTD <- suppressWarnings(toPct(COUNTRY$PerfYTD))
+COUNTRY$Recom <- suppressWarnings(as.numeric(COUNTRY$Recom))
+COUNTRY$AvgVolume <- suppressWarnings(formatKMB(COUNTRY$AvgVolume))
+COUNTRY$RelVolume <- suppressWarnings(as.numeric(COUNTRY$RelVolume))
+COUNTRY$Change <- suppressWarnings(toPct(COUNTRY$Change))
+COUNTRY$Volume <- suppressWarnings(formatKMB(COUNTRY$Volume))
+```
+
+
+## Add Coordinates
+We will add country's coordinates to table. source: <https://gist.github.com/ofou/df09a6834a8421b4f376c875194915c9>
+```{r , echo=FALSE}
+# re-assign
+fv_tbl <- COUNTRY
+fv_tbl[,c(2:7,11)] <- round(fv_tbl[,c(2:7,11)]*100,2)
+# map country returns
+caps = read.csv('country-capital-lat-long-population.csv')
+caps$Country <- str_replace(string=caps$Country,pattern = "Republic of Korea",replacement = "South Korea")
+caps$Country <- str_replace(string=caps$Country,pattern = "China, Hong Kong SAR",replacement = "Hong Kong")
+caps$Country <- str_replace(string=caps$Country,pattern = "China, Taiwan Province of China",replacement = "Taiwan")
+caps$Country <- str_replace(string=caps$Country,pattern = "United States of America",replacement = "USA")
+
+# add latitude/longitude
+TBL = data.frame(do.call(rbind,lapply(as.list(1:nrow(fv_tbl)), function(i){
+  # subset county
+  country <- fv_tbl[i,]
+  # subset caps
+  SUB <- caps[which( caps$Country == country$Name),]
+  # add lat/long
+  country$longitude <- SUB$Longitude
+  country$latitude  <- SUB$Latitude
+  # return country
+  country
+})))
+```
+
+
+## Plot Interactive Map
+
+```{r ,echo=FALSE}
+cat("\n\nWorld YTD Performance: ")
+DATA<- TBL
+DATA$longitude <- as.numeric(DATA$longitude)
+DATA$latitude <- as.numeric(DATA$latitude)
+coordinates(DATA) <- ~longitude+latitude
+# plot
+leaflet(DATA) %>% addMarkers(label = ~htmlEscape(paste0(Name," [",percent(PerfYTD*100,scale = 0.01),"]"))) %>% 
+  addTiles() %>% addCircleMarkers(radius = ~sqrt(PerfYTD*100))
+```
+

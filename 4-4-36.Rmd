@@ -1,0 +1,152 @@
+---
+title: "Historical Risk Premiums"
+output:
+  html_document:
+    df_print: paged
+geometry: margin=1cm
+date: '`r format(Sys.Date()-1, "%A, %B %d, %Y")`'
+---
+
+```{=html}
+<style>
+body {
+    position: absolute;
+    left: 0px;}
+</style>
+```
+```{r setup, include=FALSE}
+#setwd("/Volumes/6TB/R")
+suppressPackageStartupMessages(require("quantmod"))
+suppressPackageStartupMessages(require("lubridate"))
+suppressPackageStartupMessages(require("PerformanceAnalytics"))
+#source("/Volumes/6TB/R/getFinHub.R")
+# tinytex::install_tinytex()
+DATE <- Sys.Date()-1
+daytoday <- format(DATE,"%Y%m%d")
+```
+
+## Get Stock Data
+
+We will start by getting stock OHLCV data from FinHub
+
+```{r getData}
+# assign a benchmark
+bm = "QQQ"
+# assign stocks
+# Qs = readRDS("/Volumes/6TB/constituents/invesco/20230626.rds")
+# Qs = subset(Qs,Qs$Fund.Ticker=="QQQ")
+stks = c("MSFT", "AAPL", "AMZN", "NVDA", "META", "TSLA", "GOOGL", "GOOG", 
+         "AVGO", "PEP", "COST", "ADBE", "CSCO", "NFLX", "AMD", "CMCSA", 
+         "TMUS", "TXN", "INTC", "HON", "QCOM", "INTU", "AMGN", "AMAT", 
+         "ISRG", "SBUX", "MDLZ", "BKNG", "GILD", "ADI", "VRTX", "ADP", 
+         "REGN", "LRCX", "PANW", "PYPL", "MU", "CSX", "ATVI", "SNPS", 
+         "KLAC", "ASML", "CDNS", "MNST", "MELI", "ORLY", "FTNT", "MAR", 
+         "ABNB", "CHTR", "NXPI", "MRVL", "CTAS", "DXCM", "MRNA", "LULU", 
+         "WDAY", "MCHP", "KDP", "KHC", "AEP", "ADSK", "CPRT", "PDD", "AZN", 
+         "PCAR", "BIIB", "EXC", "IDXX", "PAYX", "ON", "SGEN", "ROST", 
+         "ODFL", "CSGP", "GEHC", "XEL", "EA", "FAST", "GFS", "VRSK", "CRWD", 
+         "CTSH", "DLTR", "BKR", "ILMN", "CEG", "WBD", "DDOG", "ANSS", 
+         "WBA", "ALGN", "TEAM", "EBAY", "FANG", "ENPH", "ZS", "ZM", "JD", 
+         "SIRI", "LCID")
+
+ticker_vec = c(bm,stks)
+# get stock data for 5 years
+ALL <- do.call(merge,lapply(as.list(c(ticker_vec)), function(x){
+  #cat("\n",x)
+  if((which(x == ticker_vec) %% 30) == 0){Sys.sleep(3)}
+  tmp <- try(getStkCandlesFH(stk=x,res="D",from=Sys.Date()-lubridate::years(5), to = Sys.Date(),apiKey = pw$apiKey), silent = TRUE)
+  if(inherits(tmp,'try-error')){
+    tmp = Cl(getSymbols(Symbols = x,from=Sys.Date()-lubridate::years(5), auto.assign = FALSE))
+    colnames(tmp) = gsub(".Close","",names(tmp))
+  }else{
+  # convert to xts
+  tmp = xts(tmp$close,order.by = as.Date(tmp$timeStamp));colnames(tmp)<-c(x)
+    }
+  # return xts
+  tmp
+  }))
+
+# get daily returns for all stocks
+RETS <- ROC(ALL)
+
+# for the risk free rate we will use the 1 month rate and convert to daily
+getSymbols.FRED(Symbols = "DGS1MO", env = .GlobalEnv)
+# na fill
+DGS1MO = na.locf(DGS1MO)
+# convert to daily rate
+DGS1MO = DGS1MO/100/360
+# subset interest rate to match XTS
+DGS1MO = DGS1MO[index(ALL)]
+```
+
+## Calculate risk premiums
+
+We will use `PerformanceAnalytics::CAPM.RiskPremium()`
+
+The CAPM Risk Premium on an investment is the measure of how much the asset's performance differs from the risk free rate. Negative Risk Premium generally indicates that the investment is a bad investment, and the money should be allocated to the risk free asset or to a different asset with a higher risk premium.
+
+```{r riskPremiums, echo=FALSE}
+
+tbl_rets = merge(RETS,DGS1MO)
+tbl_rets[is.na(tbl_rets)] <- 0
+# compute risk premiums for all stocks
+risk_prem = apply.monthly(RETS, FUN = function(x) PerformanceAnalytics::CAPM.RiskPremium(Ra=x, Rf=tbl_rets$DGS1MO))
+
+```
+
+## Assign Stock + Plot Risk-Premium
+
+```{r assignSTK, echo=FALSE, fig.keep='last', warning=FALSE}
+
+stk = "META"
+tbl_plot = na.locf(merge(tbl_rets[,stk], risk_prem[,stk])) 
+colnames(tbl_plot) = c("stk","risk_prem")
+chartSeries(cumsum(tbl_plot$stk), name=stk)
+addTA(tbl_plot$risk_prem, col="red")
+```
+
+
+## Add Trading signals
+
+We will add trading signals for long/short entries:
+
+Rules: 
+
+1. Long as long as the risk premium is positive 
+
+2. Short as long as the risk premium is negative + Buy 1-month treasury
+
+```{r trade, echo=FALSE, warning=FALSE, fig.keep='last'}
+# rebalancing occurs the last trading day of each month
+trade_tbl <- tbl_plot
+# create the trading signals
+trade_tbl$sig = ifelse(trade_tbl$risk_prem < 0, -1, 1) 
+# add risk free-rate
+trade_tbl$Rf = tbl_rets$DGS1MO
+
+# add returns
+# Long-Stock Returns:
+trade_tbl$long_return_stk = ifelse(trade_tbl$sig == 1, trade_tbl$stk*trade_tbl$sig,0)
+# Short-Stock Returns:
+trade_tbl$short_return_stk = ifelse(trade_tbl$sig == -1, trade_tbl$stk*trade_tbl$sig,0)
+# Long 1-Month Treasury - if short
+trade_tbl$long_return_bill <- 0
+# endpoints
+eps = endpoints(trade_tbl,on="months")
+# if the signal is short add bill return - bill is 28 days for 1 month
+ifelse(trade_tbl[eps,"sig"]==-1, trade_tbl[eps,"long_return_bill"]<- as.numeric(trade_tbl[eps,"Rf"])*28,0)
+# add return of long-stock + T-Bill (no shorting)
+trade_tbl$long_stk_long_bill = trade_tbl$long_return_stk + trade_tbl$long_return_bill 
+# 50% allocations - 50% short & 50% t-bills
+trade_tbl$short_return_stk <- trade_tbl$short_return_stk*0.50
+trade_tbl$long_return_bill <- trade_tbl$long_return_bill*0.50
+# add total return
+trade_tbl$total_return = as.numeric(trade_tbl$long_return_stk+trade_tbl$short_return_stk+trade_tbl$long_return_bill)
+# plot returns
+# charts.PerformanceSummary(merge(trade_tbl$stk,trade_tbl[,c("long_return_stk","short_return_stk",
+#                                                            "long_return_bill","total_return","long_stk_long_bill")]),
+#                           geometric = FALSE, cex.legend=1.25,main = paste0("Risk-Premium Trading: ",stk))
+chart.CumReturns(merge(trade_tbl$stk,trade_tbl[,c("long_return_stk","short_return_stk",
+                                                           "long_return_bill","total_return","long_stk_long_bill")]),legend.loc = "topleft",
+                          geometric = FALSE,main = paste0("Risk-Premium Trading: ",stk))
+```

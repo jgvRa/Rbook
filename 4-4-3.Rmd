@@ -1,0 +1,117 @@
+---
+title: "CME Fed Watch Tool"
+output: html_document
+date: "2024-02-01"
+---
+Script attempts to extract the 
+```{r setup, include=FALSE}
+require("quantmod");require("rvest");require("stringr");require("lubridate");require("highcharter");require("scales")
+# FOMC Schedule: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+MEETINGS <- as.Date(c("2024-01-31","2024-03-20","2024-05-01","2024-06-12","2024-07-31","2024-09-18","2024-11-07","2024-12-18"))
+# exlcude past events
+MEETINGS <- MEETINGS[MEETINGS > Sys.Date()]
+```
+
+## Get Futures Chain
+Function to get all upcoming futures
+```{r ,echo=FALSE}
+
+getFuturesChain = function(){
+  # read futures chain: https://finance.yahoo.com/quote/ZQ=F/futures/
+  pg =  read_html('https://finance.yahoo.com/quote/ZQ=F/futures/')
+  # get table
+  tbl = pg %>% html_table %>% as.data.frame
+  # get current quotes
+  qte_tbl = getQuote(tbl$Contract.Name)
+  # add mid-price
+  qte_tbl$midPRC = round((qte_tbl$High+qte_tbl$Low)/2 ,4)
+  # add contract names and description
+  qte_tbl$ContractName = tbl$Contract.Name
+  qte_tbl$SettlementDate = tbl$Settlement.Date
+  # format settlement date
+  MOS = gsub("Thirty-Day Fed Fund Futures,","",qte_tbl$SettlementDate)
+  YRS = paste0("20",str_sub(gsub(".CBT","",rownames(qte_tbl)),-2,-1))
+  qte_tbl$SettlementDate<- as.yearmon(paste0(MOS," ",YRS))
+  # drop rownames
+  data.frame(qte_tbl,row.names = NULL)
+}
+
+# get futures chain
+fut_chain = getFuturesChain()
+# print chain
+print(fut_chain)
+```
+
+## Extract Probabilities
+
+```{r getProbs, echo=FALSE}
+
+getProbs = function(meetingDate, curTargetLo, curTargetHi){
+  # pin-point future contract that is IN meeting date
+  iloc <- which(as.yearmon(meetingDate) == fut_chain$SettlementDate)
+  # get pertinent future contracts only
+  prob_chains <- fut_chain[(iloc-1):iloc,]
+  # get the number of days before/after meetings
+  days_prior = as.numeric(format(meetingDate,'%d'))-1
+  endOfMo = as.numeric(format(ceiling_date(x=meetingDate,unit="months")-1,"%d"))
+  days_after = endOfMo - (days_prior+1)
+  # convert days to percentages
+  days_prior_pct = days_prior/(days_prior+days_after)
+  days_after_pct = days_after/(days_prior+days_after)
+  # calculate end price on meeting month
+  t0_mid_prc   = prob_chains$midPRC[1]
+  t1_start_prc = t0_mid_prc
+  t1_avg_prc   = prob_chains$midPRC[2]
+  t1_end_prc   = round((t1_avg_prc-(days_prior_pct*t1_start_prc))/days_after_pct,4)
+  # calculate monthly change - (100-X) is the implied rate... ex. (100 - 95.420) == 4.58 implied rate
+  mo_delta = (100-t1_end_prc)-(100-t1_start_prc)
+  # number of 25 bp hikes 
+  bp_hikes = mo_delta/25*100
+  # full 25 bp hikes & direction
+  bp25_n = trunc(bp_hikes)
+  mod_bp25= bp_hikes %% 1
+  SIGN = sign(bp_hikes)
+  # rate hike/cut size probabilities
+  # unchanged probability 
+  unch_prob = mod_bp25
+  # 
+  bp25_prob = (1-unch_prob)
+  # combine into data frame
+  PROB = rbind(
+    data.frame(prob=unch_prob, loRate = curTargetLo, hiRate= curTargetHi, meetingDate = meetingDate),
+    data.frame(prob=bp25_prob, loRate = curTargetLo+(0.25*SIGN), hiRate = curTargetHi+(0.25*SIGN), meetingDate=meetingDate))
+  
+  PROB
+}
+# currently only the upcoming (next) can be calculated
+nextPROB <- getProbs(meetingDate = MEETINGS[1],curTargetLo = 5.25, curTargetHi = 5.50)
+
+```
+
+## Plot Probabilities
+
+```{r , echo=FALSE}
+
+# add group for interest rate range
+nextPROB$group = paste0(scales::dollar(nextPROB$loRate,accuracy = 0.01,prefix = ""),"-",
+                        scales::dollar(nextPROB$hiRate,accuracy = 0.01,prefix = ""))
+# Multiply Rates by 100
+nextPROB$prob <- round(nextPROB$prob,4)*100
+# re-order from low rate to high rate
+nextPROB <- nextPROB[order(nextPROB$loRate,decreasing = FALSE),]
+
+# plot probs
+nextPROB %>% 
+  hchart(
+    'column', hcaes(x = 'group', y = 'prob'),
+    stacking = "normal"
+  )  %>% 
+  hc_title(text=paste0("Target Rate Probabilities For ",format(nextPROB$meetingDate[1],"%d %b %Y")," Fed Meeting"), align="center") %>% 
+  hc_subtitle(text= paste0("Current Target Rate is: ",nextPROB$group[2]), align="center")  %>% 
+  hc_yAxis(opposite = FALSE,labels = list(format = "{value}%"), title=list(text="Probability")) %>% 
+  hc_xAxis(title=list(text="Target Rate (in bps)")) %>%
+  hc_tooltip(pointFormat = '{point.y: .3f}%')
+
+```
+
+

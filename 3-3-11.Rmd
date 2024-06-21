@@ -1,0 +1,72 @@
+---
+title: "Volatility Trader"
+output: html_document
+date: "2023-08-01"
+---
+
+<https://cran.r-project.org/web/packages/volatilityTrader/volatilityTrader.pdf>
+<https://cran.r-project.org/web/packages/bearishTrader/bearishTrader.pdf>
+<https://cran.r-project.org/web/packages/bullishTrader/bullishTrader.pdf>
+
+```{r setup, include=FALSE, echo=FALSE}
+# load packages
+require('volatilityTrader');require("dplyr")
+```
+
+## Volatility Trader Package Wrappers
+
+1. `aStraddlePnL` : Calculates per share Profit and Loss (PnL) at expiration for Straddle Option Strategy and draws its Bar Plot displaying PnL in the Plots tab.
+
+```{r  straddlePnL, echo=FALSE}
+# QQQ options
+# variable assignment
+underlying_prc = 382.79
+call_premium = 6.65
+put_premium = 4.92
+strike_prc = 382
+lower_lmt = 0.95
+upper_lmt = 1.05
+# calculate PnL at Expiration
+stradPnl <- aStraddlePnL(ST=underlying_prc,
+             X = strike_prc,
+             C = call_premium,
+             P = put_premium,
+             hl=lower_lmt,
+             hu=upper_lmt
+             )
+# plot
+print(stradPnl)
+# get levels 
+print(as.data.frame(stradPnl$data))
+```
+
+2. `strapPnL` = Calculates per share Profit and Loss (PnL) at expiration for Strap Option Strategy and draws its Bar Plot displaying PnL in the Plots tab.
+
+This is a volatility strategy consisting of a long position in two ATM (at the money) calls , and a long position in an ATM (at the money) put option with a strike price X. This is a net debit trade.
+The trader or investor has bullish outlook (Kakushadze & Serur, 2018).
+```{r strapPlt, echo=FALSE}
+# TSLA options
+# variable assignment
+underlying_prc = 261.07
+strk = 260
+call_premium1 = 14.40
+call_premium2 = 14.40
+put_premium = 12.00
+lower_lmt = 0.70
+upper_lmt = 1.30
+
+strapPlt <- strapPnL(ST=underlying_prc,
+                     X = strk,
+                     C1 = call_premium1,
+                     C2 = call_premium2,
+                     P = put_premium,
+                     hl = lower_lmt,
+                     hu = upper_lmt
+)
+
+# plot
+print(strapPlt)
+# get levels 
+print(as.data.frame(strapPlt$data))
+
+```

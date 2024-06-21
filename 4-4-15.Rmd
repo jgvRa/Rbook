@@ -1,0 +1,90 @@
+---
+title: "Correlations to Prior Periods"
+output: html_document
+date: "2023-08-17"
+---
+
+This script will attempt to ty to find prior period correlations with a specific date range set by the user.
+
+```{r setup, include=FALSE}
+require("quantmod");require("pbapply");require("data.table");require('highcharter');require("lubridate")
+```
+
+## SPX Daily Prices
+
+Get stock OHLCV data and calculate returns.
+```{r spyData}
+# assign stock/etf/index
+ticker = "^GSPC"
+# stock prices
+STK <- getSymbols(ticker,from="1900-01-01",auto.assign = FALSE)
+# get returns
+RETS <- na.omit(ROC(Cl(STK)))
+# cumalative returns
+cRETS <- cumsum(RETS)
+
+```
+
+## Test Range
+
+This is the date range you want to test.
+```{r assignDateRange}
+# date range: "2020-01-01/2023-08-17"
+date_range = paste0("2020-01-01/",Sys.Date())
+# subset test range
+test_range = cRETS[date_range]
+# assign number of rows for the step size
+tot_rows = nrow(test_range)
+```
+
+
+## Run Correlation Test
+Steps through each day and returns correlations
+```{r corTest}
+
+# assign last obs
+MAX = nrow(cRETS)-tot_rows
+# step through the data by 1 day to calculate correlation
+cor_ls = pblapply(as.list(0:MAX), function(ii){
+  # we will step by row num
+  tmp <- cRETS[(ii+1):(tot_rows+ii),]
+  # run correlation test
+  cor_res <- as.numeric(cor(tmp,test_range))
+  # extract date range
+  start_date <- index(tmp)[1]
+  end_date <- index(tmp)[nrow(tmp)]
+  # return data frame
+  data.frame(start_date=start_date,
+             end_date=end_date,
+             cor = round(cor_res,5)
+             )
+})
+# row bind all results
+cor_res = as.data.frame(rbindlist(cor_ls,use.names = TRUE,fill = TRUE))
+```
+
+## Results
+
+Depending on the date range you set, you may need to exclude dates "nearby". Since I used multi-year, I will remove `end_date` that are the same as the current year.
+```{r corRes}
+# remove this year's data
+cor_res_sub = subset(cor_res,as.Date(cor_res$end_date) < as.Date("2023-01-01"))
+# sort by correlation (highest to lowest)
+cor_res_sub = cor_res_sub[order(cor_res_sub$cor,decreasing = TRUE),]
+# plot the highest correlation with the test_range -- adding a year out 
+high_cor <- cRETS[paste0(cor_res_sub$start_date[1],"/",as.Date(cor_res_sub$end_date[1])+lubridate::years(1))]
+# reclass newer XTS
+plotCors = merge(high_cor,xts(coredata(test_range),order.by = index(high_cor)[1:nrow(test_range)]))
+colnames(plotCors) = c("highest_cor","current")
+
+highcharter::highchart(type = "stock") %>%
+  hc_title(text = "Correlation - Current Vs Prior") %>%
+  hc_yAxis_multiples(list(title = list(text = "Return"), opposite = FALSE),
+                       list(showLastLabel = FALSE, opposite = TRUE, title = list(text = "Current"))) %>%
+  hc_add_series(plotCors$highest_cor, type="line",yAxis=0) %>% 
+  hc_add_series(plotCors$current, type="line",yAxis=1) %>%
+  hc_tooltip(pointFormat = '{point.x:%Y-%m-%d}
+                            {point.y: .4f}%')
+
+```
+

@@ -1,0 +1,139 @@
+---
+title: "Implied Volatility Spikes"
+output: html_document
+date: "2024-01-25"
+---
+The purpose of this script is to find the average number of days (before earnings) & finding out when implied volatility spikes.
+```{r setup, include=FALSE}
+require("quantmod");require("dplyr");require("RQuantLib");require("lubridate");require("rvest")
+# source option db
+#source("getOptionSymbolsDB.R")
+# assignment
+sym = "PLTR"
+```
+
+## Get earnings dates
+
+We will get the historical earnings release dates
+```{r getEPS, echo=FALSE}
+getEPS = function(ticker, before){
+  # build url
+  URL <- paste0('https://finance.yahoo.com/calendar/earnings/?symbol=',ticker)
+  # read page
+  pg <- read_html(URL)
+  # look for table
+  tbl <- pg %>% html_table() %>% .[[1]]
+  # fix date
+  tbl$`Earnings Date` <- as.Date(tbl$`Earnings Date`,format="%b %d, %Y, %OS",tz = "America/New_York")
+  # limit future releases
+  tbl <- subset(tbl, tbl$`Earnings Date` <= as.Date(before))
+  # remove duplicate dates
+  tbl <- tbl[!duplicated(tbl$`Earnings Date`),]
+  # return table
+  tbl
+}
+# fetch earnings
+eps_tbl = getEPS(ticker=sym, before = "2024-02-10")
+# print eps table
+print(eps_tbl)
+```
+
+## Get Option Expiry Dates
+
+Get nearest Friday immediately after earnings. Here we will pass the dates & get the nearest Friday following Earnings Date(s)
+```{r getExpDates, echo=FALSE}
+# extract unique earnings dates
+DATES = unique(eps_tbl$`Earnings Date`)
+# for each date extract the following Friday
+exp_dates = do.call(c, lapply(as.list(DATES), function(x){
+  # pass in date and create sequence
+  seq_dates = seq.Date(from=x, by="1 day",length.out = 14)
+  # trading dates only
+  seq_dates = seq_dates[isBusinessDay(calendar = "UnitedStates/NYSE",dates = seq_dates)]
+  # find next Friday
+  as.Date(seq_dates[which(weekdays(seq_dates) == "Friday")[1]])
+}))
+# print expiration dates
+exp_dates
+```
+
+## Get Option Chains
+
+We will get options data from database expirying on the dates from the above dates. Use 20 days prior to expiration.
+```{r getOPS, echo=FALSE}
+# OPS <- lapply(as.list(exp_dates), function(exp){
+#   # fetch options
+#   ops <- getOpSymbolsByTickerFromTo(ticker = sym, from = (as.Date(exp) - days(20)), to =  as.Date(exp))
+#   # subset to option chain expirying on "exp"
+#   ops <- subset(ops, as.Date(ops$expiry) == as.Date(exp))
+#   # subset desired columns only
+#   ops <- ops[,c("iv", "expiry", "flag", "strike", "stkClose", "Date", "days2Exp", "Mid")]
+#   # select OTM only
+#   ops$stk2strike <- as.numeric(ops$strike) - as.numeric(ops$stkClose)
+#   calls <- subset(ops, ops$flag == "C" & ops$stk2strike > 0) # OTM calls will be positive
+#   puts  <- subset(ops, ops$flag == "P" & ops$stk2strike < 0) # OTM puts will be negative
+#   ops <- rbind(calls,puts)
+#   # return options
+#   ops
+# })
+# # row bind results and return as data frame
+# ops <- as.data.frame(do.call(rbind,OPS))
+# read in options to save time
+ops <- readRDS("pltr_ops.rds")
+```
+
+
+## Get Implied Vols
+
+In this block, we will extract the implied volatility by DTE & calculate the percentage change in IVs
+```{r getIVS, echo=FALSE}
+# get DTEs > 0
+ops <- subset(ops,ops$days2Exp >0)
+# summarise data 
+ivs = ops %>% group_by(flag, expiry, days2Exp) %>% reframe(avg_iv = mean(iv))
+# for each expiry find the % change in IV by DTE
+ivs = do.call(rbind,lapply(as.list(unique(ivs$expiry)), function(x){
+  # subset table by expiration
+  tmp = subset(ivs, ivs$expiry == x)
+  # split by calls/puts
+  calls = subset(tmp,tmp$flag == "C")
+  puts = subset(tmp,tmp$flag == "P")
+  # re-order by decreasing DTE
+  calls = calls[order(calls$days2Exp, decreasing = T),]
+  puts = puts[order(puts$days2Exp, decreasing = T),]
+  # find % difference for each day
+  calls$pct_ch =ROC(calls$avg_iv,type = "discrete")
+  puts$pct_ch = ROC(puts$avg_iv,type = "discrete")
+  # return combined table
+  na.omit(rbind(calls,puts))
+})) %>% as.data.frame()
+# multiply iv x 100
+ivs$pct_ch = ivs$pct_ch*100
+```
+
+
+## Plot Changes
+
+Plot the changes in IV by DTE
+```{r plotIVs, echo=FALSE}
+# split by calls/puts
+ivs_c = subset(ivs, ivs$flag == "C")
+ivs_p = subset(ivs, ivs$flag == "P")
+
+# calls 
+ivs_c %>% 
+  hchart(
+    'line', hcaes(x = 'days2Exp', y = 'pct_ch',group='expiry')
+  ) %>%
+  hc_xAxis(reversed= TRUE) %>%
+  hc_title(text=paste0("Call - IV Changes by DTE"), align="center") %>% 
+  hc_tooltip(pointFormat = '{point.y: .3f}%')
+# puts
+ivs_p %>% 
+  hchart(
+    'line', hcaes(x = 'days2Exp', y = 'pct_ch',group='expiry')
+  ) %>%
+  hc_xAxis(reversed= TRUE) %>%
+  hc_title(text=paste0("Put - IV Changes by DTE"), align="center") %>% 
+  hc_tooltip(pointFormat = '{point.y: .3f}%')
+```

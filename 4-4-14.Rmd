@@ -1,0 +1,152 @@
+---
+title: "Best/Worst Week For Stocks"
+output: html_document
+date: "2023-12-28"
+---
+
+```{r setup, include=FALSE}
+require("quantmod");require("dplyr");require("plotly");require("RQuantLib")
+```
+
+## Get Data
+
+Assign Ticker and get OHLCV data
+```{r stkData, echo=FALSE}
+# assign any ticker here
+STK <- "SPY"
+# get data
+stk_dta  <- getSymbols(STK, from="1970-01-01",auto.assign = FALSE)
+# calculate weekly return on the close price
+wkly_ret <- weeklyReturn(Cl(stk_dta))
+```
+
+## Split by Year
+
+In the following block we will subset by year. We will add the week number and year as columns then convert to data frame.
+```{r splitRet, echo=FALSE}
+# get all unique years in data
+YRS <- unique(format(index(wkly_ret),"%Y"))
+# for each year assign a week number & get rid of dates
+ret_df = as.data.frame(do.call(rbind,lapply(as.list(YRS), function(x){
+  # subset by year
+  tmp <- wkly_ret[paste(x)]
+  # add week number as column
+  tmp$wk_num <- as.numeric(format(index(tmp),'%W'))
+  # add year as column
+  tmp$yr_num <- as.numeric(x)
+  # convert as data frame
+  data.frame(coredata(tmp))
+})))
+```
+
+## Analyze Data
+
+Re-frame by week number to see the average return
+```{r refData, echo=FALSE}
+# group by week number
+byWk = ret_df %>% group_by(wk_num) %>% reframe(num_obs = n(),                                                         # number of observations
+                                               n_gains = sum(weekly.returns>0),                                       # number of gains
+                                               n_loss  = sum(weekly.returns<0),                                       # number of losers
+                                               win_pct = round(sum(weekly.returns>0)/n(),4),                          # win percentage
+                                               avg_ret = round(mean(weekly.returns,na.rm = T),4),                     # average return
+                                               med_ret = round(median(weekly.returns,na.rm = T),4),                   # median return
+                                               max_ret = round(max(weekly.returns,na.rm = T),4),                      # max return
+                                               min_ret = round(min(weekly.returns,na.rm = T),4),                      # min return
+                                               avg_gain= round(mean(weekly.returns[weekly.returns>0]),4),             # average gain
+                                               avg_loss= round(mean(weekly.returns[weekly.returns<0]),4),             # average loss
+                                               total_ret = round(sum(weekly.returns),4),                              # total return 
+                                               annual_sharpe = round((mean(weekly.returns,na.rm = T)/
+                                                                       sd(weekly.returns))*sqrt(52),4)                # Annualized Sharpe ratio
+)
+
+```
+
+
+## Return Vs Week Number
+
+```{r viewWks, echo=FALSE}
+
+fig <- plot_ly(byWk, x = ~wk_num, y = ~avg_ret*100, type = 'bar', name = 'avg_ret')
+fig <- fig %>% layout(title = "Week Number Vs Return",
+         xaxis = list(title = "Weekly Number"),
+         yaxis = list(title = "Week Return"))
+fig
+```
+
+
+## View Best/Worst Weeks
+
+```{r viewWks, echo=FALSE}
+# add week number to weekly returns
+wkly_ret$wk_num <- as.numeric(format(index(wkly_ret),'%W'))
+
+bestWk <- subset(wkly_ret, wkly_ret$wk_num == byWk$wk_num[which.max(byWk$annual_sharpe)])
+bestWk2<- subset(wkly_ret, wkly_ret$wk_num == 48)
+worstWk<- subset(wkly_ret, wkly_ret$wk_num == byWk$wk_num[which.min(byWk$annual_sharpe)])
+
+View(bestWk)
+View(bestWk2)
+View(worstWk)
+```
+
+## Plot Best/Worst Weeks
+
+```{r pltWks, echo=FALSE}
+bWk1 <- data.frame(date=index(bestWk), coredata(bestWk))
+bWk2 <- data.frame(date=index(bestWk2), coredata(bestWk2))
+bWk3 <- data.frame(date=index(worstWk), coredata(worstWk))
+
+fig0 <- plot_ly(bWk1, x = ~date, y = ~round(weekly.returns*100,4), type = 'bar', name = 'avg_ret') %>% 
+          layout(title = paste0("Best Week #: ", bWk1$wk_num[1]),
+          xaxis = list(title = "Date"),
+          yaxis = list(title = "Week Return"))
+
+fig1 <- plot_ly(bWk2, x = ~date, y = ~round(weekly.returns*100,4), type = 'bar', name = 'avg_ret') %>% 
+          layout(title = paste0("Best Week #: ", bWk2$wk_num[1]),
+          xaxis = list(title = "Date"),
+          yaxis = list(title = "Week Return"))
+
+fig2 <- plot_ly(bWk3, x = ~date, y = ~round(weekly.returns*100,4), type = 'bar', name = 'avg_ret') %>% 
+          layout(title = paste0("Worst Week #: ", bWk3$wk_num[1]),
+          xaxis = list(title = "Date"),
+          yaxis = list(title = "Week Return"))
+
+
+fig0
+fig1
+fig2
+```
+
+
+## Next Year's Week Numbers
+
+```{r getNextYr, echo=FALSE}
+# if current week number is greater than or equal to 51, then return NEXT YEAR
+YEAR <- ifelse(as.numeric(format(Sys.Date(), "%W")) >= 51, as.numeric(paste0(format(Sys.Date(),"%Y")))+1, as.numeric(paste0(format(Sys.Date(),"%Y"))))
+
+# sequence of dates
+nextYr <- seq.Date(from=as.Date(paste0(YEAR,"-01-01")),
+                   to=as.Date(paste0(YEAR,"-12-31")),
+                   by = "1 day")
+# get trading days only
+nextYr <- nextYr[isBusinessDay(calendar = "UnitedStates/NYSE", dates = nextYr)]
+# create empty XTS
+nextYr <- xts(rep(0,length(nextYr)), order.by = nextYr)
+# get end of week only
+nextYr <- nextYr[endpoints(nextYr, on = "weeks",k = 1)]
+# create data frame
+nextYr <- data.frame(weekEnd = index(nextYr), week_num = as.numeric(format(index(nextYr), "%W")))
+
+# subset desired weeks
+w1 <- nextYr[nextYr$week_num == byWk$wk_num[which.max(byWk$annual_sharpe)],]
+w2 <- nextYr[nextYr$week_num == 48,]
+w3 <- nextYr[nextYr$week_num == byWk$wk_num[which.min(byWk$annual_sharpe)],]
+
+# print out the trading week dates
+cat("\nBest Weeks: ")
+sprintf(fmt="%s : Week # %s", w1$weekEnd,w1$week_num)
+sprintf(fmt="%s : Week # %s", w2$weekEnd,w2$week_num)
+cat("\nWorst Weeks: ")
+sprintf(fmt="%s : Week # %s", w3$weekEnd,w3$week_num)
+```
+
