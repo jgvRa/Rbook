@@ -1,0 +1,21 @@
+```{r tsla}
+library(tidyquant)
+
+# Get stock data for Tesla ( TSLA )
+tsla_stock <- tq_get("TSLA", from = "2024-01-01", to = "2024-06-30")
+
+# Calculate daily returns
+tsla_returns <- tsla_stock %>% tq_transmute(select = adjusted , mutate_fun = periodReturn, period = 'daily')
+
+head(tsla_returns, n =3)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
